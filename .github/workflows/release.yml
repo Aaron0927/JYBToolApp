@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 'latest'
+
+      - name: Build project
+        run: |
+          xcodebuild -project JYBToolApp.xcodeproj \
+            -scheme JYBToolApp \
+            -configuration Release \
+            -derivedDataPath DerivedData \
+            build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Create app archive
+        run: |
+          cd DerivedData/Build/Products/Release
+          zip -r JYBToolApp.zip JYBToolApp.app
+
+      - name: Download Sparkle tools
+        run: |
+          mkdir sparkle
+          curl -L https://github.com/sparkle-project/Sparkle/releases/download/2.6.3/Sparkle-for-Swift-Package-Manager.zip -o sparkle/Sparkle.zip
+          unzip sparkle/Sparkle.zip -d sparkle
+
+      - name: Generate appcast and sign
+        env:
+          APPED25519: ${{ secrets.APPED25519 }}
+        run: |
+          echo "$APPED25519" > sparkle/appcast.pem
+          chmod +x sparkle/Sparkle/bin/*
+          sparkle/Sparkle/bin/generate_appcast \
+            -c sparkle/appcast.pem \
+            DerivedData/Build/Products/Release/JYBToolApp.zip
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            DerivedData/Build/Products/Release/JYBToolApp.zip
+            appcast.xml
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

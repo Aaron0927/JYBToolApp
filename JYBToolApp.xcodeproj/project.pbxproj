@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		3BA5FD192F67EC93006EFF57 /* ProjectCopyTool in Frameworks */ = {isa = PBXBuildFile; productRef = 3BA5FD182F67EC93006EFF57 /* ProjectCopyTool */; };
 		3BA5FD1C2F67EDE2006EFF57 /* ProjectSwitchTool in Frameworks */ = {isa = PBXBuildFile; productRef = 3BA5FD1B2F67EDE2006EFF57 /* ProjectSwitchTool */; };
+		3BA5FDD92F68F558006EFF57 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 3BA5FDD82F68F558006EFF57 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -17,9 +18,22 @@
 		3BA5FD1A2F67EDD7006EFF57 /* ProjectSwitchTool */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = ProjectSwitchTool; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3BA5FDDB2F68FC49006EFF57 /* Exceptions for "JYBToolApp" folder in "JYBToolApp" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3BA5FCBB2F640351006EFF57 /* JYBToolApp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		3BA5FCBE2F640351006EFF57 /* JYBToolApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				3BA5FDDB2F68FC49006EFF57 /* Exceptions for "JYBToolApp" folder in "JYBToolApp" target */,
+			);
 			path = JYBToolApp;
 			sourceTree = "<group>";
 		};
@@ -30,6 +44,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3BA5FDD92F68F558006EFF57 /* Sparkle in Frameworks */,
 				3BA5FD1C2F67EDE2006EFF57 /* ProjectSwitchTool in Frameworks */,
 				3BA5FD192F67EC93006EFF57 /* ProjectCopyTool in Frameworks */,
 			);
@@ -94,6 +109,7 @@
 			packageProductDependencies = (
 				3BA5FD182F67EC93006EFF57 /* ProjectCopyTool */,
 				3BA5FD1B2F67EDE2006EFF57 /* ProjectSwitchTool */,
+				3BA5FDD82F68F558006EFF57 /* Sparkle */,
 			);
 			productName = JYBToolApp;
 			productReference = 3BA5FCBC2F640351006EFF57 /* JYBToolApp.app */;
@@ -124,6 +140,7 @@
 			mainGroup = 3BA5FCB32F640351006EFF57;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				3BA5FDD72F68F558006EFF57 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3BA5FCBD2F640351006EFF57 /* Products */;
@@ -289,6 +306,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = JYBToolApp/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -321,6 +339,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = JYBToolApp/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -363,6 +382,17 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		3BA5FDD72F68F558006EFF57 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		3BA5FD182F67EC93006EFF57 /* ProjectCopyTool */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -371,6 +401,11 @@
 		3BA5FD1B2F67EDE2006EFF57 /* ProjectSwitchTool */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ProjectSwitchTool;
+		};
+		3BA5FDD82F68F558006EFF57 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3BA5FDD72F68F558006EFF57 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
