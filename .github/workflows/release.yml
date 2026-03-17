@@ -30,6 +30,7 @@ jobs:
 
       - name: Create app archive
         run: |
+          ls -la DerivedData/Build/Products/Release/
           cd DerivedData/Build/Products/Release
           zip -r JYBToolApp.zip JYBToolApp.app
 
@@ -38,13 +39,17 @@ jobs:
           mkdir -p sparkle
           curl -L https://github.com/sparkle-project/Sparkle/releases/download/2.6.3/Sparkle-for-Swift-Package-Manager.zip -o sparkle/Sparkle.zip
           unzip -o sparkle/Sparkle.zip -d sparkle
-          ls -la sparkle/
 
-      - name: Generate appcast (without signing)
+      - name: Generate appcast and sign
+        env:
+          APPED25519: ${{ secrets.APPED25519 }}
         run: |
+          echo "$APPED25519" > sparkle/appcast.pem
           SPARKLE_TOOLS=$(find sparkle -name "bin" -type d | head -1)
           chmod +x "$SPARKLE_TOOLS"/*
-          "$SPARKLE_TOOLS/generate_appcast" DerivedData/Build/Products/Release/JYBToolApp.zip
+          "$SPARKLE_TOOLS/generate_appcast" \
+            -x sparkle/appcast.pem \
+            DerivedData/Build/Products/Release/JYBToolApp.zip
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
