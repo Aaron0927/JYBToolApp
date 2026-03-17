@@ -55,8 +55,14 @@ jobs:
 
       - name: Generate Appcast
         run: |
-          chmod +x sparkle/Sparkle/bin/generate_appcast
-          ./sparkle/Sparkle/bin/generate_appcast --ed-key-file sparkle/ed25519_private_key sparkle
+          generate_appcast_path="$(find sparkle -type f -name generate_appcast -print -quit)"
+          if [ -z "$generate_appcast_path" ]; then
+            echo "generate_appcast not found under sparkle directory"
+            find sparkle -maxdepth 4 -type f | sed -n '1,200p'
+            exit 1
+          fi
+          chmod +x "$generate_appcast_path"
+          "$generate_appcast_path" --ed-key-file sparkle/ed25519_private_key sparkle
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2
