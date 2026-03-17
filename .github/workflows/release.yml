@@ -23,7 +23,10 @@ jobs:
             -scheme JYBToolApp \
             -configuration Release \
             -archivePath build/JYBToolApp.xcarchive \
-            archive
+            archive \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Create sparkle directory
         run: mkdir -p sparkle
