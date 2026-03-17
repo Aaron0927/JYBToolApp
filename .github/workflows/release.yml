@@ -48,7 +48,7 @@ jobs:
           SPARKLE_TOOLS=$(find sparkle -name "bin" -type d | head -1)
           chmod +x "$SPARKLE_TOOLS"/*
           "$SPARKLE_TOOLS/generate_appcast" \
-            -c sparkle/appcast.pem \
+            -s "$(cat sparkle/appcast.pem)" \
             DerivedData/Build/Products/Release/JYBToolApp.zip
 
       - name: Upload Release Asset
