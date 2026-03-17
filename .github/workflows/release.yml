@@ -33,19 +33,21 @@ jobs:
           cd DerivedData/Build/Products/Release
           zip -r JYBToolApp.zip JYBToolApp.app
 
-      - name: Download Sparkle tools
+      - name: Download and extract Sparkle tools
         run: |
-          mkdir sparkle
+          mkdir -p sparkle
           curl -L https://github.com/sparkle-project/Sparkle/releases/download/2.6.3/Sparkle-for-Swift-Package-Manager.zip -o sparkle/Sparkle.zip
-          unzip sparkle/Sparkle.zip -d sparkle
+          unzip -o sparkle/Sparkle.zip -d sparkle
+          ls -la sparkle/
 
       - name: Generate appcast and sign
         env:
           APPED25519: ${{ secrets.APPED25519 }}
         run: |
           echo "$APPED25519" > sparkle/appcast.pem
-          chmod +x sparkle/Sparkle/bin/*
-          sparkle/Sparkle/bin/generate_appcast \
+          SPARKLE_TOOLS=$(find sparkle -name "bin" -type d | head -1)
+          chmod +x "$SPARKLE_TOOLS"/*
+          "$SPARKLE_TOOLS/generate_appcast" \
             -c sparkle/appcast.pem \
             DerivedData/Build/Products/Release/JYBToolApp.zip
 
