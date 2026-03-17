@@ -23,10 +23,12 @@ jobs:
             -scheme JYBToolApp \
             -configuration Release \
             -archivePath build/JYBToolApp.xcarchive \
+            -destination 'generic/platform=macOS' \
             archive \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
+          ditto "build/JYBToolApp.xcarchive/Products/Applications/JYBToolApp.app" "build/JYBToolApp.app"
 
       - name: Create sparkle directory
         run: mkdir -p sparkle
