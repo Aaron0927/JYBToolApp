@@ -6,57 +6,57 @@ on:
       - 'v*'
 
 jobs:
-  build-and-release:
+  build:
     runs-on: macos-latest
-    
+
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: 'latest'
 
-      - name: Build project
+      - name: Build App
         run: |
-          xcodebuild -project JYBToolApp.xcodeproj \
+          xcodebuild \
+            -project JYBToolApp.xcodeproj \
             -scheme JYBToolApp \
             -configuration Release \
-            -derivedDataPath DerivedData \
-            build \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_REQUIRED=NO
+            -archivePath build/JYBToolApp.xcarchive \
+            archive
 
-      - name: Create app archive
-        run: |
-          ls -la DerivedData/Build/Products/Release/
-          cd DerivedData/Build/Products/Release
-          zip -r JYBToolApp.zip JYBToolApp.app
+      - name: Create sparkle directory
+        run: mkdir -p sparkle
 
-      - name: Download and extract Sparkle tools
+      - name: Create DMG
         run: |
-          mkdir -p sparkle
-          curl -L https://github.com/sparkle-project/Sparkle/releases/download/2.6.3/Sparkle-for-Swift-Package-Manager.zip -o sparkle/Sparkle.zip
+          hdiutil create \
+            -volname JYBToolApp \
+            -srcfolder build/JYBToolApp.app \
+            -ov \
+            -format UDZO \
+            sparkle/JYBToolApp-${{ github.ref_name }}.dmg
+
+      - name: Import Sparkle Key to Keychain
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.APPED25519 }}
+        run: |
+          echo "$SPARKLE_PRIVATE_KEY" > sparkle/private_key.pem
+          security create-keychain -p temp-password temp.keychain
+          security unlock-keychain -p temp-password temp.keychain
+          security import sparkle/private_key.pem -k temp.keychain -P ""
+
+      - name: Download Sparkle tools
+        run: |
+          curl -L https://github.com/sparkle-project/Sparkle/releases/download/2.9.0/Sparkle-for-Swift-Package-Manager.zip -o sparkle/Sparkle.zip
           unzip -o sparkle/Sparkle.zip -d sparkle
 
-      - name: Generate appcast and sign
-        env:
-          APPED25519: ${{ secrets.APPED25519 }}
+      - name: Generate Appcast
         run: |
-          echo "$APPED25519" > sparkle/appcast.pem
-          SPARKLE_TOOLS=$(find sparkle -name "bin" -type d | head -1)
-          chmod +x "$SPARKLE_TOOLS"/*
-          "$SPARKLE_TOOLS/generate_appcast" \
-            -x sparkle/appcast.pem \
-            DerivedData/Build/Products/Release/JYBToolApp.zip
+          chmod +x sparkle/Sparkle/bin/generate_appcast
+          ./sparkle/Sparkle/bin/generate_appcast sparkle
 
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v1
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
         with:
-          files: |
-            DerivedData/Build/Products/Release/JYBToolApp.zip
-            appcast.xml
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: sparkle/*.dmg
