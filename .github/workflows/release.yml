@@ -40,16 +40,11 @@ jobs:
           unzip -o sparkle/Sparkle.zip -d sparkle
           ls -la sparkle/
 
-      - name: Generate appcast and sign
-        env:
-          APPED25519: ${{ secrets.APPED25519 }}
+      - name: Generate appcast (without signing)
         run: |
-          echo "$APPED25519" > sparkle/appcast.pem
           SPARKLE_TOOLS=$(find sparkle -name "bin" -type d | head -1)
           chmod +x "$SPARKLE_TOOLS"/*
-          "$SPARKLE_TOOLS/generate_appcast" \
-            -s "$(cat sparkle/appcast.pem)" \
-            DerivedData/Build/Products/Release/JYBToolApp.zip
+          "$SPARKLE_TOOLS/generate_appcast" DerivedData/Build/Products/Release/JYBToolApp.zip
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
