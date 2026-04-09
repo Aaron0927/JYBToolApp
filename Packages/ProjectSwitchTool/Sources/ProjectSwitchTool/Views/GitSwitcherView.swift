@@ -9,84 +9,56 @@ import SwiftUI
 
 public struct GitSwitcherView: View {
     @State private var viewModel = GitSwitcherViewModel()
-    @State private var scrollProxy: ScrollViewProxy?
-    
+
     public init() {}
-    
+
     public var body: some View {
         VStack(spacing: 16) {
             headerView
-            
+
             Divider()
-            
+
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("工作目录:")
                         .frame(width: 80, alignment: .trailing)
-                    
+
                     HStack(spacing: 8) {
                         TextField("请选择工作目录", text: $viewModel.projectPath)
                             .textFieldStyle(.roundedBorder)
                             .disabled(true)
-                        
+
                         Button("选择") {
                             viewModel.selectWorkspace()
                         }
                         .disabled(viewModel.isWorking)
-                        
+
                         Button("开始切换") {
                             viewModel.switchWorkspace()
                         }
                         .disabled(viewModel.isWorking || viewModel.repos.isEmpty)
-                        
+
                         if viewModel.isWorking {
                             ProgressView()
                                 .scaleEffect(0.8)
                         }
                     }
-                    
+
                     Spacer()
                 }
-                
+
                 Text("示例:/Users/xxx/Desktop/XXX/GDC_TradeBook")
                     .font(.footnote)
                     .foregroundStyle(.tertiary)
                     .padding(.leading, 88)
             }
             .padding(.horizontal)
-            
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
-                        ForEach(viewModel.logs) { entry in
-                            Text(entry.message)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundStyle(logColor(for: entry.level))
-                                .frame(height: 18, alignment: .leading)
-                                .id(entry.id)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .onAppear {
-                        scrollProxy = proxy
-                    }
-                    .onChange(of: viewModel.logs.count) { _, _ in
-                        if let lastLog = viewModel.logs.last {
-                            withAnimation {
-                                proxy.scrollTo(lastLog.id, anchor: .bottom)
-                            }
-                        }
-                    }
-                }
-                .textSelection(.enabled)
-                .padding(.horizontal)
-                .background(Color(NSColor.textBackgroundColor))
-                .clipShape(.rect(cornerRadius: 8))
-            }
+
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    
+
     private var headerView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -98,7 +70,7 @@ public struct GitSwitcherView: View {
                     .fontWeight(.semibold)
                 Spacer()
             }
-            
+
             Text("选择券商并更新券商对应的仓库分支,支持自动 stash 未提交的更改")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -106,19 +78,6 @@ public struct GitSwitcherView: View {
         .padding()
         .background(Color(NSColor.windowBackgroundColor))
         .clipShape(.rect(cornerRadius: 8))
-    }
-    
-    private func logColor(for level: LogLevel) -> Color {
-        switch level {
-        case .success:
-            return .green
-        case .error:
-            return .red
-        case .warning:
-            return .orange
-        case .info:
-            return .cyan
-        }
     }
 }
 

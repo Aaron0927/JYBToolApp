@@ -1,26 +1,69 @@
 import SwiftUI
 
 public struct BranchSwitchView: View {
-    @State private var viewModel = BranchSwitchViewModel()
+    @Bindable var viewModel: BranchSwitchViewModel
 
-    public init() {}
+    public init(viewModel: BranchSwitchViewModel) {
+        self.viewModel = viewModel
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            // 标题栏
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.title)
+                        .foregroundStyle(.blue)
+                    Text("公版分支切换")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Spacer()
+                }
+
+                Text("切换主仓库分支，自动同步更新所有子模块到各自配置的分支")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+            .clipShape(.rect(cornerRadius: 8))
+
             // 仓库选择区
             HStack {
                 Text("仓库路径：")
-                TextField("选择仓库目录", text: $viewModel.repoPath)
-                    .textFieldStyle(.roundedBorder)
-                Button("浏览...") {
-                    viewModel.selectRepository()
+                    .frame(width: 80, alignment: .trailing)
+
+                HStack(spacing: 8) {
+                    TextField("请选择仓库目录", text: $viewModel.repoPath)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(true)
+
+                    Button("浏览...") {
+                        viewModel.selectRepository()
+                    }
+                    .disabled(viewModel.isLoading)
+
+                    if !viewModel.repoPath.isEmpty && !viewModel.isLoading {
+                        Button("在 Xcode 中打开") {
+                            viewModel.openInXcode()
+                        }
+                    }
+                }
+
+                if viewModel.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
                 }
             }
+            .padding(.horizontal)
 
             // 分支选择
-            if !viewModel.branches.isEmpty {
+            if !viewModel.repoPath.isEmpty && !viewModel.branches.isEmpty {
                 HStack {
                     Text("分支：")
+                        .frame(width: 80, alignment: .trailing)
+
                     Picker("", selection: $viewModel.selectedBranch) {
                         ForEach(viewModel.branches, id: \.self) { branch in
                             Text(branch).tag(branch)
@@ -28,31 +71,33 @@ public struct BranchSwitchView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
+
+                    Spacer()
                 }
+                .padding(.horizontal)
             }
 
             Divider()
 
-            // 子模块预览
-            if !viewModel.submodules.isEmpty {
+            // 子模块分支
+            if !viewModel.repoPath.isEmpty && !viewModel.submoduleBranches.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("子模块预览")
+                    Text("子模块分支")
                         .font(.headline)
 
                     ScrollView {
                         VStack(alignment: .leading, spacing: 4) {
-                            ForEach(viewModel.submodules) { submodule in
+                            ForEach(viewModel.submoduleBranches) { info in
                                 HStack {
-                                    Text(submodule.name)
-                                    Text("→")
-                                        .foregroundStyle(.secondary)
-                                    Text(submodule.branch)
+                                    Text(info.name)
+                                    Text(info.targetBranch)
                                         .foregroundStyle(.blue)
                                     Spacer()
                                 }
                                 .font(.system(.body, design: .monospaced))
                             }
                         }
+                        .frame(maxWidth: .infinity)
                         .padding()
                     }
                     .frame(maxHeight: 200)
@@ -68,35 +113,12 @@ public struct BranchSwitchView: View {
                         .disabled(!viewModel.isConfirmEnabled || viewModel.isLoading)
                     }
                 }
+                .padding(.horizontal)
             }
 
-            Divider()
-
-            // 日志区
-            VStack(alignment: .leading, spacing: 8) {
-                Text("日志")
-                    .font(.headline)
-
-                ScrollView {
-                    ScrollViewReader { proxy in
-                        ForEach(Array(viewModel.logs.enumerated()), id: \.offset) { index, log in
-                            Text(log)
-                                .font(.system(.caption, design: .monospaced))
-                                .id(index)
-                        }
-                        .onChange(of: viewModel.logs.count) { _, _ in
-                            withAnimation {
-                                proxy.scrollTo(viewModel.logs.count - 1)
-                            }
-                        }
-                    }
-                }
-                .frame(maxHeight: .infinity)
-                .background(Color.black.opacity(0.1))
-                .clipShape(.rect(cornerRadius: 8))
-            }
+            Spacer()
         }
-        .padding()
+        .padding(.vertical)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

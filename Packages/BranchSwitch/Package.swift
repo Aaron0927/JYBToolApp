@@ -7,9 +7,11 @@ let package = Package(
     products: [
         .library(name: "BranchSwitch", targets: ["BranchSwitch"])
     ],
-    dependencies: [],
+    dependencies: [
+        .package(name: "JYBLog", path: "../JYBLog")
+    ],
     targets: [
-        .target(name: "BranchSwitch", dependencies: []),
+        .target(name: "BranchSwitch", dependencies: ["JYBLog"]),
         .testTarget(name: "BranchSwitchTests", dependencies: ["BranchSwitch"])
     ]
 )

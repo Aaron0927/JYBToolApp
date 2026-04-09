@@ -9,12 +9,15 @@ import SwiftUI
 import ProjectSwitchTool
 import ProjectCopyTool
 import BranchSwitch
+import JYBLog
 
 struct ContentView: View {
     @State private var viewModel = ContentViewModel()
-    
+    @State private var branchSwitchViewModel = BranchSwitch.BranchSwitchViewModel()
+
     var body: some View {
-        NavigationSplitView {
+        VStack(spacing: 0) {
+            NavigationSplitView {
             List(selection: $viewModel.selectedToolId) {
                 ForEach(viewModel.sortedCategories, id: \.self) { category in
                     Section(category) {
@@ -26,7 +29,7 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("工具箱")
-            
+
         } detail: {
             if let tool = viewModel.selectedTool {
                 switch tool.id {
@@ -37,7 +40,7 @@ struct ContentView: View {
                     ProjectCopyTool.ContentView()
 
                 case "branch":
-                    BranchSwitch.BranchSwitchView()
+                    BranchSwitchView(viewModel: branchSwitchViewModel)
 
                 default:
                     Text("未知工具")
@@ -48,6 +51,8 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 700, minHeight: 500)
+            LogPanelView()
+        }
     }
 }
 
