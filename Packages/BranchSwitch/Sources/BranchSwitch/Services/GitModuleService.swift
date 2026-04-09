@@ -157,6 +157,16 @@ public final class GitModuleService: Sendable {
         return branches
     }
 
+    public func getCurrentBranch(at path: String) -> String? {
+        let processRunner = ProcessRunner()
+        do {
+            let output = try processRunner.run("git rev-parse --abbrev-ref HEAD", at: path)
+            return output.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return nil
+        }
+    }
+
     public func checkoutMainRepo(branch: String, at repoPath: String) throws {
         let processRunner = ProcessRunner()
         _ = try processRunner.run("git checkout \(branch)", at: repoPath)

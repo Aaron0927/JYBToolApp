@@ -9,27 +9,20 @@ public struct ContentView: View {
     public var body: some View {
         VStack(spacing: 0) {
             headerView
-            
+
             Divider()
-            
+
             if viewModel.isRunning {
                 RenameProgressView(viewModel: viewModel)
-            } else if viewModel.isCompleted {
-                resultView
             } else {
                 ConfigFormView(viewModel: viewModel)
             }
-            
+
             Divider()
-            
+
             footerView
         }
         .frame(minWidth: 500, minHeight: 400)
-        .alert("错误", isPresented: $viewModel.showError) {
-            Button("确定", role: .cancel) { }
-        } message: {
-            Text(viewModel.errorMessage)
-        }
     }
     
     private var headerView: some View {
@@ -42,8 +35,14 @@ public struct ContentView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
+
+                Button("在 Xcode 中打开") {
+                    openInXcode()
+                }
+                .disabled(!hasWorkspace || viewModel.isRunning)
+                .opacity(hasWorkspace ? 1 : 0.5)
             }
-            
+
             Text("复制并重命名指定路径项目，支持批量替换前缀、文件内容、plist 等")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -52,63 +51,39 @@ public struct ContentView: View {
         .background(Color(NSColor.windowBackgroundColor))
         .clipShape(.rect(cornerRadius: 8))
     }
-    
-    private var resultView: some View {
-        VStack(spacing: 20) {
-            Image(systemName: viewModel.isSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(viewModel.isSuccess ? .green : .red)
-            
-            Text(viewModel.isSuccess ? "重命名成功!" : "重命名失败")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            if let result = viewModel.result {
-                VStack(alignment: .leading, spacing: 8) {
-                    resultRow(icon: "doc.text", title: "替换文件数", value: "\(result.filesReplaced)")
-                    resultRow(icon: "folder", title: "重命名目录数", value: "\(result.directoriesRenamed)")
-                    resultRow(icon: "doc", title: "重命名文件数", value: "\(result.filesRenamed)")
-                    resultRow(icon: "clock", title: "耗时", value: String(format: "%.2f 秒", result.duration))
-                }
-                .padding()
-                .background(Color(NSColor.controlBackgroundColor))
-                .clipShape(.rect(cornerRadius: 8))
-            }
-            
-            HStack(spacing: 16) {
-                Button("返回") {
-                    viewModel.reset()
-                }
-                .buttonStyle(.bordered)
-                
-                if viewModel.isSuccess && !viewModel.projectURLs.isEmpty {
-                    Button {
-                        for url in viewModel.projectURLs {
-                            NSWorkspace.shared.open(url)
-                        }
-                    } label: {
-                        Label("打开项目", systemImage: "folder")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
+
+    private var hasWorkspace: Bool {
+        for pair in viewModel.sourceTargetPairs where !pair.targetPath.isEmpty {
+            let url = URL(fileURLWithPath: pair.targetPath)
+            let fileManager = FileManager.default
+
+            if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
+               matches.contains(where: { $0.pathExtension == "xcworkspace" || $0.pathExtension == "xcodeproj" }) {
+                return true
             }
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        return false
     }
-    
-    private func resultRow(icon: String, title: String, value: String) -> some View {
-        HStack {
-            Image(systemName: icon)
-                .foregroundStyle(.secondary)
-            Text(title)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .fontWeight(.medium)
+
+    private func openInXcode() {
+        for pair in viewModel.sourceTargetPairs where !pair.targetPath.isEmpty {
+            let url = URL(fileURLWithPath: pair.targetPath)
+            let fileManager = FileManager.default
+
+            if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
+               let workspace = matches.first(where: { $0.pathExtension == "xcworkspace" }) {
+                NSWorkspace.shared.openApplication(at: workspace, configuration: NSWorkspace.OpenConfiguration())
+                return
+            }
+
+            if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
+               let project = matches.first(where: { $0.pathExtension == "xcodeproj" }) {
+                NSWorkspace.shared.openApplication(at: project, configuration: NSWorkspace.OpenConfiguration())
+                return
+            }
         }
     }
-    
+
     private var footerView: some View {
         HStack {
             Text("保护关键词: \(Constants.protectedKeywords.joined(separator: ", "))")

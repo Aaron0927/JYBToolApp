@@ -33,6 +33,12 @@ public struct GitSwitcherView: View {
                         }
                         .disabled(viewModel.isWorking)
 
+                        Button("在 Xcode 中打开") {
+                            viewModel.openInXcode()
+                        }
+                        .disabled(!viewModel.hasWorkspace || viewModel.isWorking)
+                        .opacity(viewModel.hasWorkspace ? 1 : 0.5)
+
                         Button("开始切换") {
                             viewModel.switchWorkspace()
                         }
@@ -47,7 +53,7 @@ public struct GitSwitcherView: View {
                     Spacer()
                 }
 
-                Text("示例:/Users/xxx/Desktop/XXX/GDC_TradeBook")
+                Text("提示: 工作目录需包含 repos.yaml 配置文件")
                     .font(.footnote)
                     .foregroundStyle(.tertiary)
                     .padding(.leading, 88)

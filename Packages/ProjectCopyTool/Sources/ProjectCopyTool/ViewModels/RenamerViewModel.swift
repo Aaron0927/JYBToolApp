@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AppKit
+import JYBLog
 
 @Observable
 @MainActor
@@ -10,13 +11,10 @@ public final class RenamerViewModel {
     public var newPrefix: String = ""
     public var autoOpenProject: Bool = false
     public var modifyConfigFiles: Bool = true
-    
+
     public var isRunning: Bool = false
-    public var isCompleted: Bool = false
     public var isSuccess: Bool = false
-    public var showError: Bool = false
-    public var errorMessage: String = ""
-    
+
     public var stepStatuses: [String: StepStatus] = [:]
     public var result: RenameResult?
     
@@ -109,10 +107,10 @@ public final class RenamerViewModel {
     }
     
     public func startRename() {
-        let filteredPairs = sourceTargetPairs.filter { 
-            !$0.sourcePath.isEmpty && !$0.targetPath.isEmpty 
+        let filteredPairs = sourceTargetPairs.filter {
+            !$0.sourcePath.isEmpty && !$0.targetPath.isEmpty
         }
-        
+
         let config = RenamerConfig(
             sourceTargetPairs: filteredPairs,
             oldPrefix: oldPrefix.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -120,44 +118,55 @@ public final class RenamerViewModel {
             autoOpenProject: autoOpenProject,
             modifyConfigFiles: modifyConfigFiles
         )
-        
+
         do {
             try config.validate()
         } catch {
-            errorMessage = error.localizedDescription
-            showError = true
+            LogManager.shared.error("配置验证失败: \(error.localizedDescription)")
             return
         }
-        
+
         isRunning = true
-        isCompleted = false
         stepStatuses = [:]
-        
+
         for step in steps {
             stepStatuses[step] = .pending
         }
-        
+
+        LogManager.shared.info("开始复制项目...")
+
         renameTask = Task { @MainActor in
             let renamer = ProjectRenamer(config: config)
-            
+
             let renameResult = renamer.execute { [weak self] step, status in
                 Task { @MainActor in
                     self?.stepStatuses[step] = status
+                    switch status {
+                    case .inProgress:
+                        LogManager.shared.info("执行中: \(step)")
+                    case .completed:
+                        LogManager.shared.success("完成: \(step)")
+                    case .failed(let error):
+                        LogManager.shared.error("失败: \(step) - \(error)")
+                    case .pending:
+                        break
+                    }
                 }
             }
-            
+
             self.isRunning = false
-            self.isCompleted = true
             self.result = renameResult
             self.isSuccess = renameResult.success
-            
-            if !renameResult.success {
-                self.errorMessage = renameResult.errors.joined(separator: "\n")
-                self.showError = true
+
+            if renameResult.success {
+                LogManager.shared.success("项目复制成功！耗时: \(String(format: "%.2f", renameResult.duration))秒")
+                LogManager.shared.info("替换文件数: \(renameResult.filesReplaced), 重命名目录数: \(renameResult.directoriesRenamed), 重命名文件数: \(renameResult.filesRenamed)")
+            } else {
+                LogManager.shared.error("项目复制失败: \(renameResult.errors.joined(separator: ", "))")
             }
         }
     }
-    
+
     public func reset() {
         renameTask?.cancel()
         sourceTargetPairs = []
@@ -166,10 +175,7 @@ public final class RenamerViewModel {
         autoOpenProject = false
         modifyConfigFiles = true
         isRunning = false
-        isCompleted = false
         isSuccess = false
-        showError = false
-        errorMessage = ""
         stepStatuses = [:]
         result = nil
     }

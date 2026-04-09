@@ -1,47 +1,65 @@
 # JYBToolApp
 
-macOS 工具箱应用，使用 SwiftUI 开发。
+macOS 工具箱应用，使用 SwiftUI 开发，包含多个实用工具提升开发效率。
 
 ## 功能列表
 
+### Git 工具
+
+- **切换券商** - 批量切换 Git 仓库分支，支持自动 stash/pull
+- **公版切换** - 批量更新子模块到指定分支
+
 ### 项目工具
 
-- **Git 分支切换器** - 批量切换 Git 仓库分支
-
-### 工具 (开发中)
-
-- 文本工具
-- 图片工具
+- **私版项目复制** - 复制并重命名项目，支持批量替换前缀、文件内容、plist 等
 
 ## 项目结构
 
 ```
 JYBToolApp/
-├── Packages/
-│   └── GitSwitcher/          # Git 分支切换器包
-├── JYBToolApp/                # 主应用
-│   ├── Models/
+├── JYBToolApp/              # 主应用入口
+│   ├── JYBToolAppApp.swift  # @main 入口
+│   ├── AppDelegate.swift
+│   ├── Models/Tool.swift    # 工具定义
 │   ├── Views/
-│   └── ViewModels/
-└── AGENTS.md
+│   │   ├── ContentView.swift
+│   │   └── LogPanelView.swift  # 统一日志面板
+│   └── ViewModels/ContentViewModel.swift
+└── Packages/
+    ├── JYBLog/              # 统一日志包
+    ├── ProjectSwitchTool/    # Git 分支切换器
+    ├── BranchSwitch/         # 公版分支切换
+    └── ProjectCopyTool/      # 项目复制工具
 ```
 
-## GitSwitcher 包
+## 统一日志
 
-Git 分支切换器是一个独立的 Swift Package，包含以下功能：
+日志系统（JYBLog）提供统一的日志输出：
 
-- 批量扫描 Git 仓库
-- 读取当前分支和目标分支
-- 自动 stash 未提交的更改
-- 批量切换分支并 pull
+- 5 个日志级别：debug、info、success、warning、error
+- 可折叠/展开的底部面板
+- 可拖动调整高度（收起 40px，展开 100-400px）
+- 日志级别过滤
+- 自动滚动到最新日志
 
-### 依赖
+## 构建命令
 
-- [Yams](https://github.com/jpsim/Yams) - YAML 解析
+```bash
+# 构建主应用
+xcodebuild -project JYBToolApp.xcodeproj -scheme JYBToolApp -configuration Debug build
 
-### 使用方法
+# 运行测试
+xcodebuild test -project JYBToolApp.xcodeproj -scheme JYBToolApp
 
-1. 在工作目录下创建 `repos.yaml` 文件：
+# 运行指定测试
+xcodebuild test -project JYBToolApp.xcodeproj -scheme ProjectSwitchTool -only-testing:ProjectSwitchToolTests/GitSwitcherTests
+```
+
+## 工具使用
+
+### 切换券商
+
+1. 在工作目录创建 `repos.yaml`：
 
 ```yaml
 org: your-org-name
@@ -50,46 +68,26 @@ repos:
   repo-name-2: target-branch
 ```
 
-2. 在应用中选择工作目录（repos.yaml 所在目录）
-3. 点击"开始切换"按钮
+2. 在应用中选择工作目录
+3. 点击"开始切换"
 
-### API 使用
+### 公版切换
 
-```swift
-import GitSwitcher
+1. 选择主仓库路径
+2. 从下拉列表选择目标分支
+3. 确认切换所有子模块
 
-// 使用 ViewModel
-let viewModel = GitSwitcherViewModel()
-viewModel.selectWorkspace()
-viewModel.switchWorkspace()
+### 私版项目复制
 
-// 或使用视图
-GitSwitcherView()
-```
+1. 添加源项目和目标路径
+2. 输入旧前缀和新前缀
+3. 点击开始复制
 
-## 开发
+## 开发规范
 
-### 构建项目
-
-```bash
-xcodebuild -project JYBToolApp.xcodeproj -scheme JYBToolApp -configuration Debug build
-```
-
-### 运行测试
-
-```bash
-# 运行所有测试
-xcodebuild test -project JYBToolApp.xcodeproj -scheme GitSwitcher
-
-# 运行特定测试
-xcodebuild test -project JYBToolApp.xcodeproj -scheme GitSwitcher -only-testing:RepoTests
-```
-
-## 添加新工具
-
-1. 在 `JYBToolApp/Models/Tool.swift` 中添加工具定义
-2. 在 `ContentViewModel` 中处理工具逻辑
-3. 在 `ContentView` 的 detail 区域添加对应的视图
+- 使用 `@Observable @MainActor` 管理共享数据
+- 优先使用 async/await API
+- SwiftUI 规范见 `AGENTS.md`
 
 ## 许可证
 

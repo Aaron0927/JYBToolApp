@@ -30,6 +30,20 @@ public final class BranchSwitchViewModel {
     public var isLoading: Bool = false
     public var isConfirmEnabled: Bool = false
 
+    public var hasWorkspace: Bool {
+        guard !repoPath.isEmpty else { return false }
+        if findWorkspace(in: repoPath) != nil {
+            return true
+        }
+        for info in submoduleBranches {
+            let submodulePath = (repoPath as NSString).appendingPathComponent(info.path)
+            if findWorkspace(in: submodulePath) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
     private let service = GitModuleService()
 
     public init() {

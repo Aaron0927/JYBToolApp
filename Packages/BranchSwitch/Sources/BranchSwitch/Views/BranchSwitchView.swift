@@ -21,7 +21,7 @@ public struct BranchSwitchView: View {
                     Spacer()
                 }
 
-                Text("切换主仓库分支，自动同步更新所有子模块到各自配置的分支")
+                Text("选择一个主仓库分支，确认后自动更新所有子模块到各自预定的分支")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -44,11 +44,11 @@ public struct BranchSwitchView: View {
                     }
                     .disabled(viewModel.isLoading)
 
-                    if !viewModel.repoPath.isEmpty && !viewModel.isLoading {
-                        Button("在 Xcode 中打开") {
-                            viewModel.openInXcode()
-                        }
+                    Button("在 Xcode 中打开") {
+                        viewModel.openInXcode()
                     }
+                    .disabled(!viewModel.hasWorkspace || viewModel.isLoading)
+                    .opacity(viewModel.hasWorkspace ? 1 : 0.5)
                 }
 
                 if viewModel.isLoading {

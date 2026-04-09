@@ -7,7 +7,10 @@ let package = Package(
     products: [
         .library(name: "ProjectCopyTool", targets: ["ProjectCopyTool"])
     ],
+    dependencies: [
+        .package(name: "JYBLog", path: "../JYBLog")
+    ],
     targets: [
-        .target(name: "ProjectCopyTool", dependencies: [])
+        .target(name: "ProjectCopyTool", dependencies: ["JYBLog"])
     ]
 )

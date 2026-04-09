@@ -22,7 +22,7 @@ struct ContentView: View {
                 ForEach(viewModel.sortedCategories, id: \.self) { category in
                     Section(category) {
                         ForEach(viewModel.groupedTools[category] ?? []) { tool in
-                            Text(tool.name)
+                            Label(tool.name, systemImage: tool.icon)
                                 .tag(tool.id)
                         }
                     }
