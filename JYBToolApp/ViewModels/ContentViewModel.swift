@@ -16,6 +16,7 @@ final class ContentViewModel {
     let tools: [Tool] = [
         Tool(id: "switch", name: "切换券商", category: "项目"),
         Tool(id: "copy", name: "复制项目", category: "项目"),
+        Tool(id: "branch", name: "公版切换", category: "项目"),
     ]
     
     var groupedTools: [String: [Tool]] {

@@ -8,6 +8,7 @@
 import SwiftUI
 import ProjectSwitchTool
 import ProjectCopyTool
+import BranchSwitch
 
 struct ContentView: View {
     @State private var viewModel = ContentViewModel()
@@ -31,9 +32,13 @@ struct ContentView: View {
                 switch tool.id {
                 case "switch":
                     ProjectSwitchTool.GitSwitcherView()
-                    
+
                 case "copy":
                     ProjectCopyTool.ContentView()
+
+                case "branch":
+                    BranchSwitch.BranchSwitchView()
+
                 default:
                     Text("未知工具")
                 }

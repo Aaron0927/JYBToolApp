@@ -10,12 +10,14 @@
 		3BA5FD192F67EC93006EFF57 /* ProjectCopyTool in Frameworks */ = {isa = PBXBuildFile; productRef = 3BA5FD182F67EC93006EFF57 /* ProjectCopyTool */; };
 		3BA5FD1C2F67EDE2006EFF57 /* ProjectSwitchTool in Frameworks */ = {isa = PBXBuildFile; productRef = 3BA5FD1B2F67EDE2006EFF57 /* ProjectSwitchTool */; };
 		3BA5FDD92F68F558006EFF57 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 3BA5FDD82F68F558006EFF57 /* Sparkle */; };
+			3BA5FDD02F68F558006EFF57 /* BranchSwitch in Frameworks */ = {isa = PBXBuildFile; productRef = 3BA5FDD12F68F558006EFF57 /* BranchSwitch */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		3BA5FCBC2F640351006EFF57 /* JYBToolApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JYBToolApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3BA5FD172F67EC8B006EFF57 /* ProjectCopyTool */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = ProjectCopyTool; sourceTree = "<group>"; };
 		3BA5FD1A2F67EDD7006EFF57 /* ProjectSwitchTool */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = ProjectSwitchTool; sourceTree = "<group>"; };
+			3BA5FDC22F68F558006EFF57 /* BranchSwitch */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = BranchSwitch; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -47,6 +49,7 @@
 				3BA5FDD92F68F558006EFF57 /* Sparkle in Frameworks */,
 				3BA5FD1C2F67EDE2006EFF57 /* ProjectSwitchTool in Frameworks */,
 				3BA5FD192F67EC93006EFF57 /* ProjectCopyTool in Frameworks */,
+				3BA5FDD02F68F558006EFF57 /* BranchSwitch in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -76,6 +79,7 @@
 			children = (
 				3BA5FD1A2F67EDD7006EFF57 /* ProjectSwitchTool */,
 				3BA5FD172F67EC8B006EFF57 /* ProjectCopyTool */,
+				3BA5FDC22F68F558006EFF57 /* BranchSwitch */,
 			);
 			path = Packages;
 			sourceTree = "<group>";
@@ -110,6 +114,7 @@
 				3BA5FD182F67EC93006EFF57 /* ProjectCopyTool */,
 				3BA5FD1B2F67EDE2006EFF57 /* ProjectSwitchTool */,
 				3BA5FDD82F68F558006EFF57 /* Sparkle */,
+				3BA5FDD12F68F558006EFF57 /* BranchSwitch */,
 			);
 			productName = JYBToolApp;
 			productReference = 3BA5FCBC2F640351006EFF57 /* JYBToolApp.app */;
@@ -300,7 +305,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 20260317;
 				DEVELOPMENT_TEAM = 2HQ3E92U25;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -333,7 +338,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 20260317;
 				DEVELOPMENT_TEAM = 2HQ3E92U25;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -391,6 +396,13 @@
 				version = 2.9.0;
 			};
 		};
+		3BA5FDD32F68F558006EFF57 /* XCRemoteSwiftPackageReference "BranchSwitch" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "file:///Users/kim/Desktop/开发工具/JYBToolApp/Packages/BranchSwitch";
+			requirement = {
+				kind = localPath;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -406,6 +418,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 3BA5FDD72F68F558006EFF57 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		3BA5FDD12F68F558006EFF57 /* BranchSwitch */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3BA5FDD32F68F558006EFF57 /* XCRemoteSwiftPackageReference "BranchSwitch" */;
+			productName = BranchSwitch;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
