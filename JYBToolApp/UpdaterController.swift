@@ -5,6 +5,7 @@
 //  Created by kim on 2026/4/21.
 //
 
+import Combine
 import Sparkle
 
 final class UpdaterController: ObservableObject {

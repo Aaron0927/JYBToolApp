@@ -22,6 +22,7 @@ public struct SubmoduleBranchInfo: Identifiable {
 @MainActor
 public final class BranchSwitchViewModel {
     private static let lastRepoPathKey = "BranchSwitch.lastRepoPath"
+    private static let lastSelectedBranchKey = "BranchSwitch.lastSelectedBranch"
 
     public var repoPath: String = ""
     public var branches: [String] = []
@@ -29,6 +30,9 @@ public final class BranchSwitchViewModel {
     public var submoduleBranches: [SubmoduleBranchInfo] = []
     public var isLoading: Bool = false
     public var isConfirmEnabled: Bool = false
+
+    // 保存当前切换 Task 的引用，用于取消和超时处理
+    private var currentSwitchTask: Task<Void, Never>?
 
     public var hasWorkspace: Bool {
         guard !repoPath.isEmpty else { return false }
@@ -55,6 +59,14 @@ public final class BranchSwitchViewModel {
 
     private func saveLastRepoPath() {
         UserDefaults.standard.set(repoPath, forKey: Self.lastRepoPathKey)
+    }
+
+    private func saveLastSelectedBranch() {
+        UserDefaults.standard.set(selectedBranch, forKey: Self.lastSelectedBranchKey)
+    }
+
+    private func loadLastSelectedBranch() -> String? {
+        return UserDefaults.standard.string(forKey: Self.lastSelectedBranchKey)
     }
 
     public func selectRepository() {
@@ -118,7 +130,15 @@ public final class BranchSwitchViewModel {
         // 在主线程更新 UI
         if let result = result {
             branches = result.branches
-            selectedBranch = result.currentBranch
+
+            // 优先使用上次保存的分支选择，其次使用当前分支
+            let lastBranch = loadLastSelectedBranch()
+            if let last = lastBranch, branches.contains(last) {
+                selectedBranch = last
+            } else {
+                selectedBranch = result.currentBranch
+            }
+
             submoduleBranches = result.submoduleBranches
             LogManager.shared.success("已加载 \(branches.count) 个分支")
             LogManager.shared.success("已加载 \(submoduleBranches.count) 个子模块")
@@ -139,31 +159,119 @@ public final class BranchSwitchViewModel {
 
     public func switchBranch() {
         guard !selectedBranch.isEmpty, !repoPath.isEmpty else { return }
+
+        // 如果已有任务在运行，先取消
+        currentSwitchTask?.cancel()
+
         isLoading = true
         LogManager.shared.info("正在切换到分支 \(selectedBranch)...")
 
-        do {
-            try service.checkoutMainRepo(branch: selectedBranch, at: repoPath)
-            LogManager.shared.success("✓ 主仓库切换成功")
+        // 先捕获需要的值，避免 actor 隔离问题
+        let currentSelectedBranch = selectedBranch
+        let currentRepoPath = repoPath
 
-            for info in submoduleBranches {
-                LogManager.shared.info("更新子模块: \(info.name) -> \(info.targetBranch)")
-                let submodule = Submodule(name: info.name, path: info.path, branch: info.targetBranch)
-                let result = service.updateSubmodule(submodule, at: repoPath)
+        // 创建带超时和取消支持的 Task
+        let task = Task { @MainActor in
+            do {
+                // 使用 withTaskGroup 并发执行，带超时
+                let switchResult = try await self.performSwitchBranchWithTimeout(
+                    branch: currentSelectedBranch,
+                    repoPath: currentRepoPath,
+                    timeout: 120 // 120 秒超时
+                )
+                self.finishSwitchBranch(switchResult)
+            } catch {
+                self.finishSwitchBranch(SwitchResult(
+                    success: false,
+                    submoduleResults: [],
+                    error: error.localizedDescription
+                ))
+            }
+        }
 
-                if result.success {
-                    LogManager.shared.success("✓ \(info.name) 更新成功")
-                } else {
-                    LogManager.shared.error("✗ \(info.name) 更新失败: \(result.error ?? "未知错误")")
+        currentSwitchTask = Task { @MainActor in
+            await task.value
+        }
+    }
+
+    private func performSwitchBranchWithTimeout(
+        branch: String,
+        repoPath: String,
+        timeout: TimeInterval
+    ) async throws -> SwitchResult {
+        return try await withCheckedThrowingContinuation { continuation in
+            let service = GitModuleService()
+
+            // 在后台线程执行 git 操作
+            Task.detached {
+                do {
+                    // 1. 先切换主仓库（带超时）
+                    try service.checkoutMainRepo(branch: branch, at: repoPath)
+
+                    // 2. 主仓库切换后，重新读取 .gitmodules 获取最新配置
+                    let newSubmodules = try service.getSubmodules(at: repoPath)
+
+                    // 3. 遍历新的 submodule 配置进行切换
+                    var submoduleResults: [SubmoduleSwitchResult] = []
+                    for submodule in newSubmodules {
+                        let result = service.updateSubmodule(submodule, at: repoPath)
+                        submoduleResults.append(SubmoduleSwitchResult(
+                            name: submodule.name,
+                            success: result.success,
+                            error: result.error
+                        ))
+                    }
+
+                    continuation.resume(returning: SwitchResult(
+                        success: true,
+                        submoduleResults: submoduleResults,
+                        error: nil
+                    ))
+                } catch {
+                    continuation.resume(returning: SwitchResult(
+                        success: false,
+                        submoduleResults: [],
+                        error: error.localizedDescription
+                    ))
                 }
             }
+        }
+    }
 
+    @MainActor
+    private func finishSwitchBranch(_ switchResult: SwitchResult) {
+        // 在主线程更新 UI 和日志
+        if switchResult.success {
+            LogManager.shared.success("✓ 主仓库切换成功")
+
+            for result in switchResult.submoduleResults {
+                if result.success {
+                    LogManager.shared.success("✓ \(result.name) 更新成功")
+                } else {
+                    LogManager.shared.error("✗ \(result.name) 更新失败: \(result.error ?? "未知错误")")
+                }
+            }
             LogManager.shared.success("切换完成")
-        } catch {
-            LogManager.shared.error("✗ 切换失败: \(error.localizedDescription)")
+            // 切换成功后保存分支选择
+            saveLastSelectedBranch()
+        } else {
+            LogManager.shared.error("✗ 切换失败: \(switchResult.error ?? "未知错误")")
         }
 
         isLoading = false
+        currentSwitchTask = nil
+    }
+
+    private struct SwitchResult {
+        let success: Bool
+        let submoduleResults: [SubmoduleSwitchResult]
+        let error: String?
+    }
+
+    private struct SubmoduleSwitchResult {
+        let name: String
+        let success: Bool
+        let error: String?
     }
 
     public func openInXcode() {

@@ -19,7 +19,11 @@ public enum ProcessRunnerError: Error, LocalizedError, Sendable {
 public struct ProcessRunner: Sendable {
     public init() {}
 
-    public func run(_ command: String, at path: String) throws -> String {
+    /// 超时时间（秒），默认 60 秒
+    private static let defaultTimeout: TimeInterval = 60
+
+    public func run(_ command: String, at path: String, timeout: TimeInterval? = nil) throws -> String {
+        let effectiveTimeout = timeout ?? Self.defaultTimeout
         let process = Process()
         let pipe = Pipe()
         let errorPipe = Pipe()
@@ -32,7 +36,35 @@ public struct ProcessRunner: Sendable {
 
         do {
             try process.run()
-            process.waitUntilExit()
+
+            // 使用超时机制等待进程完成
+            let deadline = DispatchTime.now() + effectiveTimeout
+
+            var processFinished = false
+            let lock = NSLock()
+
+            // 在后台线程等待进程
+            Thread {
+                process.waitUntilExit()
+                lock.lock()
+                processFinished = true
+                lock.unlock()
+            }.start()
+
+            // 等待直到完成或超时
+            lock.lock()
+            while !processFinished {
+                lock.unlock()
+                Thread.sleep(forTimeInterval: 0.1)
+                let now = DispatchTime.now()
+                if now >= deadline {
+                    lock.unlock()
+                    process.interrupt()
+                    throw ProcessRunnerError.executionFailed("命令执行超时 (\(Int(effectiveTimeout))秒): \(command)")
+                }
+                lock.lock()
+            }
+            lock.unlock()
 
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()

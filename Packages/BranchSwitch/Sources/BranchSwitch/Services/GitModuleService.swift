@@ -169,8 +169,20 @@ public final class GitModuleService: Sendable {
 
     public func checkoutMainRepo(branch: String, at repoPath: String) throws {
         let processRunner = ProcessRunner()
-        _ = try processRunner.run("git checkout \(branch)", at: repoPath)
-        _ = try processRunner.run("git pull", at: repoPath)
+
+        // 尝试直接切换（分支已存在）
+        do {
+            _ = try processRunner.run("git checkout \(branch)", at: repoPath)
+        } catch {
+            // 分支不存在，创建并切换
+            _ = try processRunner.run("git checkout -b \(branch)", at: repoPath)
+        }
+
+        // 检查远程分支是否存在
+        let remoteExists = try? processRunner.run("git ls-remote --heads origin \(branch)", at: repoPath)
+        if remoteExists?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != true {
+            _ = try processRunner.run("git pull", at: repoPath)
+        }
     }
 
     public func updateSubmodule(_ submodule: Submodule, at repoPath: String) -> UpdateResult {
@@ -204,13 +216,13 @@ public final class GitModuleService: Sendable {
         }
 
         // Pull
-        let pullResult = pull(at: submodulePath)
-        if !pullResult {
+        let pullResult = pull(at: submodulePath, branch: submodule.branch)
+        if !pullResult.success {
             return UpdateResult(
                 submodule: submodule,
                 success: false,
                 hadChanges: hadChanges,
-                error: "拉取失败"
+                error: "拉取失败: \(pullResult.message)"
             )
         }
 
@@ -247,20 +259,35 @@ public final class GitModuleService: Sendable {
     private func checkout(branch: String, at path: String) -> Bool {
         let processRunner = ProcessRunner()
         do {
+            // 尝试直接切换分支（分支已存在）
             _ = try processRunner.run("git checkout \(branch)", at: path)
             return true
         } catch {
-            return false
+            // 分支不存在，尝试创建并切换
+            do {
+                _ = try processRunner.run("git checkout -b \(branch)", at: path)
+                return true
+            } catch {
+                return false
+            }
         }
     }
 
-    private func pull(at path: String) -> Bool {
+    private func pull(at path: String, branch: String) -> (success: Bool, message: String) {
         let processRunner = ProcessRunner()
+
+        // 检查远程分支是否存在
+        let remoteExists = try? processRunner.run("git ls-remote --heads origin \(branch)", at: path)
+        if remoteExists?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            // 远程分支不存在，是本地分支，跳过 pull
+            return (true, "本地分支，跳过 pull")
+        }
+
         do {
-            _ = try processRunner.run("git pull", at: path)
-            return true
+            let output = try processRunner.run("git pull", at: path)
+            return (true, output.isEmpty ? "拉取成功" : output)
         } catch {
-            return false
+            return (false, error.localizedDescription)
         }
     }
 
