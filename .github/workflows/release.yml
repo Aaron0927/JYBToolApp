@@ -67,6 +67,18 @@ jobs:
           chmod +x "$generate_appcast_path"
           "$generate_appcast_path" --ed-key-file sparkle/ed25519_private_key sparkle
 
+      - name: Update appcast.xml in docs
+        run: |
+          cp sparkle/appcast.xml docs/appcast.xml
+
+      - name: Commit appcast.xml
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/appcast.xml
+          git diff --cached --quiet || git commit -m "docs: update appcast.xml for ${{ github.ref_name }}"
+          git push origin main
+
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
