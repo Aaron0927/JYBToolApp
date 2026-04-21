@@ -77,7 +77,7 @@ jobs:
           git config --local user.name "GitHub Action"
           git add docs/appcast.xml
           git diff --cached --quiet || git commit -m "docs: update appcast.xml for ${{ github.ref_name }}"
-          git push origin main
+          git push https://github.com/${{ github.repository }}.git HEAD:main
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2
