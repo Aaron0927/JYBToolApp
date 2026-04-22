@@ -33,17 +33,20 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
           ditto "build/JYBToolApp.xcarchive/Products/Applications/JYBToolApp.app" "build/JYBToolApp.app"
 
-      - name: Create sparkle directory
-        run: mkdir -p sparkle
+      - name: Install create-dmg
+        run: brew install create-dmg
 
       - name: Create DMG
         run: |
-          hdiutil create \
-            -volname JYBToolApp \
-            -srcfolder build/JYBToolApp.app \
-            -ov \
-            -format UDZO \
-            sparkle/JYBToolApp-${{ github.ref_name }}.dmg
+          create-dmg \
+            --volname "JYBToolApp" \
+            --window-pos 200 120 \
+            --icon-size 100 \
+            --icon "JYBToolApp.app" 150 150 \
+            --hide-extension "JYBToolApp.app" \
+            --app-drop-link 480 150 \
+            "sparkle/JYBToolApp-${{ github.ref_name }}.dmg" \
+            "build/JYBToolApp.app"
 
       - name: Write Sparkle Ed25519 key
         env:
