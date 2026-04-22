@@ -36,8 +36,9 @@ jobs:
       - name: Install create-dmg
         run: brew install create-dmg
 
-      - name: Create DMG
+      - name: Create DMG with Applications symlink
         run: |
+          mkdir -p sparkle
           create-dmg \
             --volname "JYBToolApp" \
             --window-pos 200 120 \
