@@ -1,33 +1,14 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-  <channel>
-    <title>JYBToolApp 更新</title>
-    <link>https://Aaron0927.github.io/JYBToolApp/appcast.xml</link>
-    <description>JYBToolApp 更新日志</description>
-    <language>zh-CN</language>
-    <item>
-      <title>版本 1.1.0</title>
-      <description><![CDATA[
-        版本更新
-      ]]></description>
-      <pubDate>Wed, 22 Apr 2026 00:00:00 +0800</pubDate>
-      <enclosure url="https://github.com/Aaron0927/JYBToolApp/releases/download/v1.1.0/JYBToolApp.zip"
-                 sparkle:version="1.1.0"
-                 sparkle:shortVersionString="1.1.0"
-                 length="0"
-                 type="application/octet-stream"/>
-    </item>
-    <item>
-      <title>版本 1.0.0</title>
-      <description><![CDATA[
-        初始版本
-      ]]></description>
-      <pubDate>Tue, 21 Apr 2026 00:00:00 +0800</pubDate>
-      <enclosure url="https://github.com/Aaron0927/JYBToolApp/releases/download/v1.0.0/JYBToolApp.zip"
-                 sparkle:version="1.0.0"
-                 sparkle:shortVersionString="1.0.0"
-                 length="0"
-                 type="application/octet-stream"/>
-    </item>
-  </channel>
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>JYBToolApp</title>
+        <item>
+            <title>1.1.0</title>
+            <pubDate>Wed, 22 Apr 2026 06:17:48 +0000</pubDate>
+            <sparkle:version>20260422</sparkle:version>
+            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+            <enclosure url="https://Aaron0927.github.io/JYBToolApp/JYBToolApp-v1.1.0.dmg" length="2922511" type="application/octet-stream" sparkle:edSignature="HFV9l3BAMJAGiAVuBA4oHjgGsHCOjdunH1qOWdM/67E2eM1mZy2Y6PGV/VsZ8UxYmPx6ovSCfSeRDv7UanxlAg=="/>
+        </item>
+    </channel>
 </rss>
