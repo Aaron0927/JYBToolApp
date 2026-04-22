@@ -185,6 +185,35 @@ public final class GitModuleService: Sendable {
         }
     }
 
+    public func checkoutMainRepoWithLog(branch: String, at repoPath: String, logger: @escaping (String) -> Void) throws {
+        let processRunner = ProcessRunner()
+
+        logger("开始切换主仓库分支: \(branch)")
+
+        // 尝试直接切换（分支已存在）
+        do {
+            logger("执行 git checkout \(branch)")
+            _ = try processRunner.run("git checkout \(branch)", at: repoPath)
+            logger("git checkout 完成")
+        } catch {
+            logger("分支不存在，创建并切换: git checkout -b \(branch)")
+            _ = try processRunner.run("git checkout -b \(branch)", at: repoPath)
+        }
+
+        // 检查远程分支是否存在
+        logger("检查远程分支是否存在...")
+        let remoteExists = try? processRunner.run("git ls-remote --heads origin \(branch)", at: repoPath)
+        if remoteExists?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != true {
+            logger("执行 git pull")
+            _ = try processRunner.run("git pull", at: repoPath)
+            logger("git pull 完成")
+        } else {
+            logger("远程分支不存在，跳过 pull")
+        }
+
+        logger("主仓库分支切换完成")
+    }
+
     public func updateSubmodule(_ submodule: Submodule, at repoPath: String) -> UpdateResult {
         let submodulePath = (repoPath as NSString).appendingPathComponent(submodule.path)
 

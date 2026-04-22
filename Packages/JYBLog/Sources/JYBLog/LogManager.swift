@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import OSLog
 
 @Observable
 @MainActor
@@ -15,26 +16,33 @@ public final class LogManager: Sendable {
     public let maxHeight: CGFloat = 400
     public let collapsedHeight: CGFloat = 40
 
+    private let logger = Logger(subsystem: "com.aaron.dev.JYBToolApp", category: "JYBLog")
+
     private init() {}
 
     public func debug(_ message: String) {
         addEntry(.debug, message: message)
+        logger.debug("\(message, privacy: .public)")
     }
 
     public func info(_ message: String) {
         addEntry(.info, message: message)
+        logger.info("\(message, privacy: .public)")
     }
 
     public func success(_ message: String) {
         addEntry(.success, message: message)
+        logger.notice("\(message, privacy: .public)")
     }
 
     public func warning(_ message: String) {
         addEntry(.warning, message: message)
+        logger.warning("\(message, privacy: .public)")
     }
 
     public func error(_ message: String) {
         addEntry(.error, message: message)
+        logger.error("\(message, privacy: .public)")
     }
 
     public func clear() {

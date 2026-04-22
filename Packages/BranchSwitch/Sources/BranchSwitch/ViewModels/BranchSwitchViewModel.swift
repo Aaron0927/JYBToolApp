@@ -131,13 +131,8 @@ public final class BranchSwitchViewModel {
         if let result = result {
             branches = result.branches
 
-            // 优先使用上次保存的分支选择，其次使用当前分支
-            let lastBranch = loadLastSelectedBranch()
-            if let last = lastBranch, branches.contains(last) {
-                selectedBranch = last
-            } else {
-                selectedBranch = result.currentBranch
-            }
+            // 直接使用当前分支
+            selectedBranch = result.currentBranch
 
             submoduleBranches = result.submoduleBranches
             LogManager.shared.success("已加载 \(branches.count) 个分支")
@@ -205,15 +200,28 @@ public final class BranchSwitchViewModel {
             // 在后台线程执行 git 操作
             Task.detached {
                 do {
-                    // 1. 先切换主仓库（带超时）
-                    try service.checkoutMainRepo(branch: branch, at: repoPath)
+                    // 1. 先切换主仓库（带日志）
+                    try service.checkoutMainRepoWithLog(branch: branch, at: repoPath) { msg in
+                        Task { @MainActor in
+                            LogManager.shared.debug(msg)
+                        }
+                    }
 
                     // 2. 主仓库切换后，重新读取 .gitmodules 获取最新配置
+                    Task { @MainActor in
+                        LogManager.shared.debug("读取 submodule 配置...")
+                    }
                     let newSubmodules = try service.getSubmodules(at: repoPath)
+                    Task { @MainActor in
+                        LogManager.shared.debug("读取到 \(newSubmodules.count) 个 submodule")
+                    }
 
                     // 3. 遍历新的 submodule 配置进行切换
                     var submoduleResults: [SubmoduleSwitchResult] = []
                     for submodule in newSubmodules {
+                        Task { @MainActor in
+                            LogManager.shared.debug("更新 submodule: \(submodule.name)")
+                        }
                         let result = service.updateSubmodule(submodule, at: repoPath)
                         submoduleResults.append(SubmoduleSwitchResult(
                             name: submodule.name,
@@ -228,6 +236,9 @@ public final class BranchSwitchViewModel {
                         error: nil
                     ))
                 } catch {
+                    Task { @MainActor in
+                        LogManager.shared.error("切换分支出错: \(error.localizedDescription)")
+                    }
                     continuation.resume(returning: SwitchResult(
                         success: false,
                         submoduleResults: [],
