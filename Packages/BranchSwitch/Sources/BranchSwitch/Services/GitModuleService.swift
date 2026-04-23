@@ -183,21 +183,10 @@ public final class GitModuleService: Sendable {
             _ = try processRunner.run("git checkout -b \(branch)", at: repoPath)
         }
 
-        // 检查当前分支是否有上游跟踪
-        let trackingInfo = try? processRunner.run("git rev-parse --abbrev-ref HEAD@{upstream}", at: repoPath)
-        if trackingInfo?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-            // 没有上游跟踪，不执行 pull
-            return
-        }
-
-        // 有上游跟踪，检查远程分支是否存在
+        // 检查远程分支是否存在
         let remoteExists = try? processRunner.run("git ls-remote --heads origin \(branch)", at: repoPath)
         if remoteExists?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != true {
-            do {
-                _ = try processRunner.run("git pull", at: repoPath)
-            } catch {
-                // git pull 失败不中断流程
-            }
+            _ = try processRunner.run("git pull origin \(branch)", at: repoPath)
         }
     }
 
@@ -216,25 +205,15 @@ public final class GitModuleService: Sendable {
             _ = try processRunner.run("git checkout -b \(branch)", at: repoPath)
         }
 
-        // 检查当前分支是否有上游跟踪
-        logger("检查上游跟踪信息...")
-        let trackingInfo = try? processRunner.run("git rev-parse --abbrev-ref HEAD@{upstream}", at: repoPath)
-        if trackingInfo?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-            logger("没有上游跟踪，跳过 pull")
-            logger("主仓库分支切换完成")
-            return
-        }
-
-        // 有上游跟踪，检查远程分支是否存在
-        logger("检查远程分支是否存在...")
+        // 检查远程分支是否存在
+        logger("检查远程分支是否存在 (仓库: \(repoPath), 分支: \(branch))...")
         let remoteExists = try? processRunner.run("git ls-remote --heads origin \(branch)", at: repoPath)
         if remoteExists?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != true {
-            logger("执行 git pull (仓库: \(repoPath), 分支: \(branch))")
+            logger("远程分支存在，执行 git pull origin \(branch)")
             do {
-                _ = try processRunner.run("git pull", at: repoPath)
+                _ = try processRunner.run("git pull origin \(branch)", at: repoPath)
                 logger("git pull 完成")
             } catch {
-                // git pull 失败不中断流程，仅记录警告
                 logger("警告: git pull 失败 (仓库: \(repoPath), 错误: \(error.localizedDescription))")
             }
         } else {
