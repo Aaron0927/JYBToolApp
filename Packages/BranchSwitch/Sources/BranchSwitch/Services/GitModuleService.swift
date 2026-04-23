@@ -193,7 +193,11 @@ public final class GitModuleService: Sendable {
         // 有上游跟踪，检查远程分支是否存在
         let remoteExists = try? processRunner.run("git ls-remote --heads origin \(branch)", at: repoPath)
         if remoteExists?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != true {
-            _ = try processRunner.run("git pull", at: repoPath)
+            do {
+                _ = try processRunner.run("git pull", at: repoPath)
+            } catch {
+                // git pull 失败不中断流程
+            }
         }
     }
 
@@ -225,9 +229,14 @@ public final class GitModuleService: Sendable {
         logger("检查远程分支是否存在...")
         let remoteExists = try? processRunner.run("git ls-remote --heads origin \(branch)", at: repoPath)
         if remoteExists?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != true {
-            logger("执行 git pull")
-            _ = try processRunner.run("git pull", at: repoPath)
-            logger("git pull 完成")
+            logger("执行 git pull (仓库: \(repoPath), 分支: \(branch))")
+            do {
+                _ = try processRunner.run("git pull", at: repoPath)
+                logger("git pull 完成")
+            } catch {
+                // git pull 失败不中断流程，仅记录警告
+                logger("警告: git pull 失败 (仓库: \(repoPath), 错误: \(error.localizedDescription))")
+            }
         } else {
             logger("远程分支不存在，跳过 pull")
         }
