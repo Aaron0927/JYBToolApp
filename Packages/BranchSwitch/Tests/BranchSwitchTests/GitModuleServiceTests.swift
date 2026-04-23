@@ -67,4 +67,23 @@ final class GitModuleServiceTests: XCTestCase {
         XCTAssertEqual(operations[2], "pull")
         XCTAssertEqual(operations[3], "stash pop")
     }
+
+    func testShouldPullWithUpstreamTracking() {
+        // 验证有上游跟踪时的处理逻辑
+        let service = GitModuleService()
+        let upstreamOutput = "origin/develop"
+
+        // 验证有上游跟踪时 shouldPull 返回 true
+        let shouldPull = service.shouldPullWithUpstream(upstreamOutput: upstreamOutput)
+        XCTAssertTrue(shouldPull)
+    }
+
+    func testShouldPullWithoutUpstreamTracking() {
+        let service = GitModuleService()
+        let upstreamOutput = ""
+
+        // 验证没有上游跟踪时 shouldPull 返回 false
+        let shouldPull = service.shouldPullWithUpstream(upstreamOutput: upstreamOutput)
+        XCTAssertFalse(shouldPull)
+    }
 }
