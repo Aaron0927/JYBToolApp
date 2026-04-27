@@ -87,3 +87,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: sparkle/*.dmg
+
+      - name: Deploy DMG to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: sparkle
+          branch: gh-pages
+          clean-exclude: |
+            appcast.xml
+            SHA256SUMS*
+          commit-message: "deploy: release ${{ github.ref_name }}"
