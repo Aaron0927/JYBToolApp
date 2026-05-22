@@ -79,9 +79,12 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          git fetch origin main
+          git checkout -B ci-appcast origin/main
+          cp sparkle/appcast.xml docs/appcast.xml
           git add docs/appcast.xml
           git diff --cached --quiet || git commit -m "docs: update appcast.xml for ${{ github.ref_name }}"
-          git push https://github.com/${{ github.repository }}.git HEAD:main
+          git push https://github.com/${{ github.repository }}.git ci-appcast:main
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2
