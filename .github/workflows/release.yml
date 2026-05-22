@@ -69,7 +69,10 @@ jobs:
             exit 1
           fi
           chmod +x "$generate_appcast_path"
-          "$generate_appcast_path" --ed-key-file sparkle/ed25519_private_key sparkle
+          "$generate_appcast_path" \
+            --ed-key-file sparkle/ed25519_private_key \
+            --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" \
+            sparkle
 
       - name: Update appcast.xml in docs
         run: |
