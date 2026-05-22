@@ -36,49 +36,49 @@ public struct ProcessRunner: Sendable {
 
         do {
             try process.run()
-
-            // 使用超时机制等待进程完成
-            let deadline = DispatchTime.now() + effectiveTimeout
-
-            var processFinished = false
-            let lock = NSLock()
-
-            // 在后台线程等待进程
-            Thread {
-                process.waitUntilExit()
-                lock.lock()
-                processFinished = true
-                lock.unlock()
-            }.start()
-
-            // 等待直到完成或超时
-            lock.lock()
-            while !processFinished {
-                lock.unlock()
-                Thread.sleep(forTimeInterval: 0.1)
-                let now = DispatchTime.now()
-                if now >= deadline {
-                    lock.unlock()
-                    process.interrupt()
-                    throw ProcessRunnerError.executionFailed("命令执行超时 (\(Int(effectiveTimeout))秒): \(command)")
-                }
-                lock.lock()
-            }
-            lock.unlock()
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-
-            let output = String(data: data, encoding: .utf8) ?? ""
-            let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-
-            if process.terminationStatus != 0 && !errorOutput.isEmpty {
-                throw ProcessRunnerError.executionFailed(errorOutput)
-            }
-
-            return output
         } catch {
-            throw ProcessRunnerError.executionFailed(error.localizedDescription)
+            throw ProcessRunnerError.executionFailed("无法启动进程: \(error.localizedDescription)")
         }
+
+        // 使用超时机制等待进程完成
+        let deadline = DispatchTime.now() + effectiveTimeout
+
+        var processFinished = false
+        let lock = NSLock()
+
+        // 在后台线程等待进程
+        Thread {
+            process.waitUntilExit()
+            lock.lock()
+            processFinished = true
+            lock.unlock()
+        }.start()
+
+        // 等待直到完成或超时
+        lock.lock()
+        while !processFinished {
+            lock.unlock()
+            Thread.sleep(forTimeInterval: 0.1)
+            let now = DispatchTime.now()
+            if now >= deadline {
+                lock.unlock()
+                process.interrupt()
+                throw ProcessRunnerError.executionFailed("命令执行超时 (\(Int(effectiveTimeout))秒): \(command)")
+            }
+            lock.lock()
+        }
+        lock.unlock()
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+
+        let output = String(data: data, encoding: .utf8) ?? ""
+        let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
+
+        if process.terminationStatus != 0 && !errorOutput.isEmpty {
+            throw ProcessRunnerError.executionFailed(errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        return output
     }
 }

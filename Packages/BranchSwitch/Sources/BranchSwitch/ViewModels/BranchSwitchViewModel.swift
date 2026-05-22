@@ -123,6 +123,9 @@ public final class BranchSwitchViewModel {
                     submoduleBranches: branchInfos
                 )
             } catch {
+                Task { @MainActor in
+                    LogManager.shared.error("加载失败: \(error.localizedDescription)")
+                }
                 return nil
             }
         }.value
@@ -155,24 +158,19 @@ public final class BranchSwitchViewModel {
     public func switchBranch() {
         guard !selectedBranch.isEmpty, !repoPath.isEmpty else { return }
 
-        // 如果已有任务在运行，先取消
         currentSwitchTask?.cancel()
-
         isLoading = true
         LogManager.shared.info("正在切换到分支 \(selectedBranch)...")
 
-        // 先捕获需要的值，避免 actor 隔离问题
         let currentSelectedBranch = selectedBranch
         let currentRepoPath = repoPath
 
-        // 创建带超时和取消支持的 Task
-        let task = Task { @MainActor in
+        currentSwitchTask = Task { @MainActor in
             do {
-                // 使用 withTaskGroup 并发执行，带超时
-                let switchResult = try await self.performSwitchBranchWithTimeout(
+                let switchResult = try await self.performSwitchBranch(
                     branch: currentSelectedBranch,
                     repoPath: currentRepoPath,
-                    timeout: 120 // 120 秒超时
+                    timeout: 120
                 )
                 self.finishSwitchBranch(switchResult)
             } catch {
@@ -183,69 +181,66 @@ public final class BranchSwitchViewModel {
                 ))
             }
         }
-
-        currentSwitchTask = Task { @MainActor in
-            await task.value
-        }
     }
 
-    private func performSwitchBranchWithTimeout(
+    private func performSwitchBranch(
         branch: String,
         repoPath: String,
         timeout: TimeInterval
     ) async throws -> SwitchResult {
-        return try await withCheckedThrowingContinuation { continuation in
-            let service = GitModuleService()
+        try await withThrowingTaskGroup(of: SwitchResult.self) { group in
+            // 主工作任务
+            group.addTask {
+                try await Task.detached { () throws -> SwitchResult in
+                    let service = GitModuleService()
 
-            // 在后台线程执行 git 操作
-            Task.detached {
-                do {
-                    // 1. 先切换主仓库（带日志）
+                    // 1. 切换主仓库
                     try service.checkoutMainRepoWithLog(branch: branch, at: repoPath) { msg in
-                        Task { @MainActor in
-                            LogManager.shared.debug(msg)
-                        }
+                        Task { @MainActor in LogManager.shared.debug(msg) }
                     }
 
-                    // 2. 主仓库切换后，重新读取 .gitmodules 获取最新配置
-                    Task { @MainActor in
-                        LogManager.shared.debug("读取 submodule 配置...")
-                    }
+                    // 2. 重新读取 .gitmodules 获取切换后的最新配置
+                    Task { @MainActor in LogManager.shared.debug("读取 submodule 配置...") }
                     let newSubmodules = try service.getSubmodules(at: repoPath)
-                    Task { @MainActor in
-                        LogManager.shared.debug("读取到 \(newSubmodules.count) 个 submodule")
-                    }
+                    Task { @MainActor in LogManager.shared.debug("读取到 \(newSubmodules.count) 个 submodule") }
 
-                    // 3. 遍历新的 submodule 配置进行切换
+                    // 3. 并发更新所有子模块
                     var submoduleResults: [SubmoduleSwitchResult] = []
-                    for submodule in newSubmodules {
-                        Task { @MainActor in
-                            LogManager.shared.debug("更新 submodule: \(submodule.name)")
+                    await withTaskGroup(of: SubmoduleSwitchResult.self) { subGroup in
+                        for submodule in newSubmodules {
+                            subGroup.addTask {
+                                Task { @MainActor in LogManager.shared.debug("更新 submodule: \(submodule.name)") }
+                                let result = await Task.detached {
+                                    service.updateSubmodule(submodule, at: repoPath)
+                                }.value
+                                return SubmoduleSwitchResult(
+                                    name: submodule.name,
+                                    success: result.success,
+                                    error: result.error
+                                )
+                            }
                         }
-                        let result = service.updateSubmodule(submodule, at: repoPath)
-                        submoduleResults.append(SubmoduleSwitchResult(
-                            name: submodule.name,
-                            success: result.success,
-                            error: result.error
-                        ))
+                        for await result in subGroup {
+                            submoduleResults.append(result)
+                        }
                     }
 
-                    continuation.resume(returning: SwitchResult(
-                        success: true,
-                        submoduleResults: submoduleResults,
-                        error: nil
-                    ))
-                } catch {
-                    Task { @MainActor in
-                        LogManager.shared.error("切换分支出错: \(error.localizedDescription)")
-                    }
-                    continuation.resume(returning: SwitchResult(
-                        success: false,
-                        submoduleResults: [],
-                        error: error.localizedDescription
-                    ))
-                }
+                    return SwitchResult(success: true, submoduleResults: submoduleResults, error: nil)
+                }.value
             }
+
+            // 超时任务：120s 后抛错，解除 UI 阻塞
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw ProcessRunnerError.executionFailed("操作超时 (\(Int(timeout))秒)")
+            }
+
+            // 取第一个完成的结果（工作完成或超时）
+            guard let result = try await group.next() else {
+                throw ProcessRunnerError.executionFailed("内部错误：任务组为空")
+            }
+            group.cancelAll()
+            return result
         }
     }
 
@@ -305,22 +300,13 @@ public final class BranchSwitchViewModel {
     }
 
     private func findWorkspace(in path: String) -> URL? {
-        let fileManager = FileManager.default
         let url = URL(fileURLWithPath: path)
-
-        // 优先查找 workspace
-        let workspaceURL = url.appendingPathComponent("*.xcworkspace")
-        if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
-           let workspace = matches.first(where: { $0.pathExtension == "xcworkspace" }) {
+        guard let entries = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else {
+            return nil
+        }
+        if let workspace = entries.first(where: { $0.pathExtension == "xcworkspace" }) {
             return workspace
         }
-
-        // 其次查找 xcodeproj
-        if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
-           let project = matches.first(where: { $0.pathExtension == "xcodeproj" }) {
-            return project
-        }
-
-        return nil
+        return entries.first(where: { $0.pathExtension == "xcodeproj" })
     }
 }

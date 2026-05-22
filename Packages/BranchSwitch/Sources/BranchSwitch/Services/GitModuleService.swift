@@ -135,14 +135,19 @@ public final class GitModuleService: Sendable {
         return parseSubmoduleBranch(from: output)
     }
 
-    public func hasChanges(at submodulePath: String) -> Bool {
+    /// 检查路径是否有已跟踪文件的改动（忽略 untracked 文件）
+    public func hasTrackedChanges(at path: String) -> Bool {
         let processRunner = ProcessRunner()
         do {
-            let output = try processRunner.run("git status --porcelain", at: submodulePath)
-            return hasChanges(output: output)
+            let output = try processRunner.run("git status --porcelain", at: path)
+            return output.split(separator: "\n").contains { !$0.hasPrefix("??") }
         } catch {
             return false
         }
+    }
+
+    public func hasChanges(at submodulePath: String) -> Bool {
+        return hasTrackedChanges(at: submodulePath)
     }
 
     // MARK: - Main Repo Operations
@@ -173,40 +178,54 @@ public final class GitModuleService: Sendable {
     }
 
     public func checkoutMainRepo(branch: String, at repoPath: String) throws {
-        let processRunner = ProcessRunner()
-
-        // 尝试直接切换（分支已存在）
-        do {
-            _ = try processRunner.run("git checkout \(branch)", at: repoPath)
-        } catch {
-            // 分支不存在，创建并切换
-            _ = try processRunner.run("git checkout -b \(branch)", at: repoPath)
-        }
-
-        // 检查远程分支是否存在
-        let remoteExists = try? processRunner.run("git ls-remote --heads origin \(branch)", at: repoPath)
-        if remoteExists?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != true {
-            _ = try processRunner.run("git pull origin \(branch)", at: repoPath)
-        }
+        try checkoutMainRepoWithLog(branch: branch, at: repoPath) { _ in }
     }
 
     public func checkoutMainRepoWithLog(branch: String, at repoPath: String, logger: @escaping (String) -> Void) throws {
         let processRunner = ProcessRunner()
-
         logger("开始切换主仓库分支: \(branch)")
 
-        // 尝试直接切换（分支已存在）
-        do {
-            logger("执行 git checkout \(branch)")
-            _ = try processRunner.run("git checkout \(branch)", at: repoPath)
-            logger("git checkout 完成")
-        } catch {
-            logger("分支不存在，创建并切换: git checkout -b \(branch)")
-            _ = try processRunner.run("git checkout -b \(branch)", at: repoPath)
+        // 暂存主仓库已跟踪的改动，避免 checkout 因脏工作区失败
+        let hadChanges = hasTrackedChanges(at: repoPath)
+        if hadChanges {
+            logger("检测到未提交更改，自动暂存")
+            do {
+                _ = try processRunner.run("git stash push -m 'BranchSwitch: auto-stash'", at: repoPath)
+                logger("暂存完成")
+            } catch {
+                logger("警告: 暂存失败: \(error.localizedDescription)")
+            }
         }
 
-        // 检查远程分支是否存在
-        logger("检查远程分支是否存在 (仓库: \(repoPath), 分支: \(branch))...")
+        // 切换分支
+        let localBranchOutput = (try? processRunner.run("git branch --list \(branch)", at: repoPath)) ?? ""
+        let branchExistsLocally = !localBranchOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        do {
+            if branchExistsLocally {
+                logger("本地分支已存在，执行 git checkout \(branch)")
+                _ = try processRunner.run("git checkout \(branch)", at: repoPath)
+            } else {
+                logger("执行 git checkout \(branch)")
+                do {
+                    _ = try processRunner.run("git checkout \(branch)", at: repoPath)
+                } catch {
+                    logger("本地分支不存在，创建并切换: git checkout -b \(branch)")
+                    _ = try processRunner.run("git checkout -b \(branch)", at: repoPath)
+                }
+            }
+            logger("git checkout 完成")
+        } catch {
+            // checkout 失败时恢复暂存，避免改动丢失
+            if hadChanges {
+                logger("切换失败，恢复暂存")
+                _ = try? processRunner.run("git stash pop", at: repoPath)
+            }
+            throw error
+        }
+
+        // 拉取远程更新
+        logger("检查远程分支是否存在...")
         let remoteExists = try? processRunner.run("git ls-remote --heads origin \(branch)", at: repoPath)
         if remoteExists?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != true {
             logger("远程分支存在，执行 git pull origin \(branch)")
@@ -214,10 +233,21 @@ public final class GitModuleService: Sendable {
                 _ = try processRunner.run("git pull origin \(branch)", at: repoPath)
                 logger("git pull 完成")
             } catch {
-                logger("警告: git pull 失败 (仓库: \(repoPath), 错误: \(error.localizedDescription))")
+                logger("警告: git pull 失败: \(error.localizedDescription)")
             }
         } else {
             logger("远程分支不存在，跳过 pull")
+        }
+
+        // 恢复暂存
+        if hadChanges {
+            logger("恢复暂存的更改")
+            do {
+                _ = try processRunner.run("git stash pop", at: repoPath)
+                logger("暂存恢复完成")
+            } catch {
+                logger("警告: 恢复暂存失败，请手动执行 git stash pop: \(error.localizedDescription)")
+            }
         }
 
         logger("主仓库分支切换完成")
@@ -287,7 +317,7 @@ public final class GitModuleService: Sendable {
     private func stash(at path: String) -> Bool {
         let processRunner = ProcessRunner()
         do {
-            _ = try processRunner.run("git stash", at: path)
+            _ = try processRunner.run("git stash push -m 'BranchSwitch: auto-stash'", at: path)
             return true
         } catch {
             return false
@@ -296,18 +326,23 @@ public final class GitModuleService: Sendable {
 
     private func checkout(branch: String, at path: String) -> Bool {
         let processRunner = ProcessRunner()
+        let localBranchOutput = (try? processRunner.run("git branch --list \(branch)", at: path)) ?? ""
+        let branchExistsLocally = !localBranchOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
         do {
-            // 尝试直接切换分支（分支已存在）
-            _ = try processRunner.run("git checkout \(branch)", at: path)
+            if branchExistsLocally {
+                _ = try processRunner.run("git checkout \(branch)", at: path)
+            } else {
+                do {
+                    _ = try processRunner.run("git checkout \(branch)", at: path)
+                } catch {
+                    // 本地和远程均无此分支，创建
+                    _ = try processRunner.run("git checkout -b \(branch)", at: path)
+                }
+            }
             return true
         } catch {
-            // 分支不存在，尝试创建并切换
-            do {
-                _ = try processRunner.run("git checkout -b \(branch)", at: path)
-                return true
-            } catch {
-                return false
-            }
+            return false
         }
     }
 
@@ -322,7 +357,7 @@ public final class GitModuleService: Sendable {
         }
 
         do {
-            let output = try processRunner.run("git pull", at: path)
+            let output = try processRunner.run("git pull origin \(branch)", at: path)
             return (true, output.isEmpty ? "拉取成功" : output)
         } catch {
             return (false, error.localizedDescription)
