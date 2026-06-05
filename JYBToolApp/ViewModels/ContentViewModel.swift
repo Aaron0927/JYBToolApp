@@ -17,6 +17,7 @@ final class ContentViewModel {
         .switchTool,
         .copyTool,
         .branchTool,
+        .reposBranchTool,
     ]
     
     var groupedTools: [String: [Tool]] {

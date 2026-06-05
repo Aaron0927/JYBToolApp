@@ -14,6 +14,7 @@ import JYBLog
 struct ContentView: View {
     @State private var viewModel = ContentViewModel()
     @State private var branchSwitchViewModel = BranchSwitch.BranchSwitchViewModel()
+    @State private var reposSwitchViewModel = BranchSwitch.ReposSwitchViewModel()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,6 +42,9 @@ struct ContentView: View {
 
                 case "branch":
                     BranchSwitchView(viewModel: branchSwitchViewModel)
+
+                case "reposBranch":
+                    ReposSwitchView(viewModel: reposSwitchViewModel)
 
                 default:
                     Text("未知工具")
