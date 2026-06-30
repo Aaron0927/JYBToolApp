@@ -32,7 +32,7 @@ public struct ReposSwitchView: View {
         Image(systemName: "list.bullet.rectangle")
           .font(.title)
           .foregroundStyle(.green)
-        Text("公版配置切换")
+        Text("公版依赖仓库切换")
           .font(.title2)
           .bold()
         Spacer()

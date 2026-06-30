@@ -30,6 +30,7 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("工具箱")
+            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
 
         } detail: {
             if let tool = viewModel.selectedTool {

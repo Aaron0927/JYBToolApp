@@ -18,81 +18,9 @@ public struct GitSwitcherView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("工作目录:")
-                        .frame(width: 80, alignment: .trailing)
-
-                    HStack(spacing: 8) {
-                        if viewModel.pathHistory.isEmpty {
-                            TextField("请选择工作目录", text: $viewModel.projectPath)
-                                .textFieldStyle(.roundedBorder)
-                                .disabled(true)
-                        } else {
-                            Menu {
-                                ForEach(viewModel.pathHistory, id: \.self) { path in
-                                    Button(path) {
-                                        viewModel.selectHistoryPath(path)
-                                    }
-                                }
-                            } label: {
-                                HStack {
-                                    TextField("请选择工作目录", text: $viewModel.projectPath)
-                                        .textFieldStyle(.roundedBorder)
-                                        .disabled(true)
-                                    Image(systemName: "chevron.down")
-                                        .font(.caption)
-                                }
-                            }
-                            .disabled(viewModel.isWorking)
-                        }
-
-                        Button("选择") {
-                            viewModel.selectWorkspace()
-                        }
-                        .disabled(viewModel.isWorking)
-
-                        Button("在 Xcode 中打开") {
-                            viewModel.openInXcode()
-                        }
-                        .disabled(!viewModel.hasWorkspace || viewModel.isWorking)
-                        .opacity(viewModel.hasWorkspace ? 1 : 0.5)
-
-                        if viewModel.isWorking {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        }
-                    }
-
-                    Spacer()
-                }
-
-                Text("提示: 工作目录需包含 repos.yaml 配置文件")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
-                    .padding(.leading, 88)
-            }
-            .padding(.horizontal)
-
-            // 仓库列表
-            if !viewModel.repos.isEmpty {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(viewModel.repos) { repo in
-                            RepoRowView(
-                                repo: repo,
-                                isWorking: viewModel.isWorking,
-                                isLoadingBranches: viewModel.isLoadingBranches,
-                                onLoadBranches: { viewModel.loadBranches(for: repo) },
-                                onLoadSubmodules: { viewModel.loadSubmodules(for: repo) },
-                                onSwitchBranch: { branch in viewModel.switchBranch(for: repo, to: branch) },
-                                onSwitchSubmodule: { submodule in viewModel.switchSubmoduleBranch(for: repo, submodule: submodule) }
-                            )
-                        }
-                    }
-                    .padding()
-                }
-            }
+            projectPicker
+            configSummary
+            repoPreview
 
             Spacer()
         }
@@ -105,13 +33,13 @@ public struct GitSwitcherView: View {
                 Image(systemName: "folder")
                     .font(.title)
                     .foregroundStyle(.blue)
-                Text("切换当前券商工作分支")
+                Text("私版券商切换")
                     .font(.title2)
-                    .fontWeight(.semibold)
+                    .bold()
                 Spacer()
             }
 
-            Text("选择券商并更新券商对应的仓库分支,支持自动 stash 未提交的更改")
+            Text("选择包含 repos.yaml 的仓库，确认后按配置批量切换仓库分支")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -119,184 +47,184 @@ public struct GitSwitcherView: View {
         .background(Color(NSColor.windowBackgroundColor))
         .clipShape(.rect(cornerRadius: 8))
     }
+
+    private var projectPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("配置仓库:")
+                    .frame(width: 80, alignment: .trailing)
+
+                TextField("默认填充上次选择的仓库", text: $viewModel.projectPath)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(true)
+
+                Button("选择仓库", systemImage: "folder") {
+                    viewModel.selectWorkspace()
+                }
+                .disabled(viewModel.isWorking)
+
+                Button("在 Xcode 中打开", systemImage: "hammer") {
+                    viewModel.openInXcode()
+                }
+                .disabled(!viewModel.hasWorkspace || viewModel.isWorking)
+
+                Button("确认切换", systemImage: "arrow.triangle.branch") {
+                    viewModel.switchWorkspace()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.repos.isEmpty || viewModel.isWorking)
+
+                if viewModel.isWorking {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
+            }
+
+            Text("选择后会立即读取仓库根目录下的 repos.yaml")
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .padding(.leading, 88)
+        }
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private var configSummary: some View {
+        if !viewModel.configPath.isEmpty {
+            labeledValue(title: "配置文件:", value: viewModel.configPath)
+                .padding(.horizontal)
+        }
+    }
+
+    @ViewBuilder
+    private var repoPreview: some View {
+        if viewModel.repos.isEmpty {
+            VStack(spacing: 10) {
+                Image(systemName: "tray")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                Text("未读取到仓库")
+                    .font(.headline)
+                Text("请选择包含 repos.yaml 的仓库")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("仓库切换预览")
+                        .font(.headline)
+                    Text("\(viewModel.repos.count)")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(viewModel.repos) { repo in
+                            RepoPreviewRow(repo: repo)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private func labeledValue(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .frame(width: 80, alignment: .trailing)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(.body, design: .monospaced))
+                .lineLimit(2)
+                .textSelection(.enabled)
+            Spacer()
+        }
+    }
 }
 
-// MARK: - Repo Row View
-
-struct RepoRowView: View {
+private struct RepoPreviewRow: View {
     let repo: Repo
-    let isWorking: Bool
-    let isLoadingBranches: Bool
-    let onLoadBranches: () -> Void
-    let onLoadSubmodules: () -> Void
-    let onSwitchBranch: (String) -> Void
-    let onSwitchSubmodule: (Submodule) -> Void
-
-    @State private var selectedBranch: String = ""
-    @State private var expanded: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // 主仓库行
-            HStack(spacing: 8) {
-                // 仓库图标
+            HStack(spacing: 10) {
                 Image(systemName: repo.isMainRepo ? "building.2" : "folder")
-                    .foregroundStyle(repo.isMainRepo ? .orange : .blue)
+                    .foregroundStyle(repo.isAvailable ? (repo.isMainRepo ? .orange : .blue) : .secondary)
 
-                // 仓库名称
                 Text(repo.name)
                     .font(.headline)
 
-                // 当前分支提示
-                Text("当前: \(repo.currentBranch)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-                    .frame(height: 20)
-
-                // 分支选择和确认切换
-                if isLoadingBranches && repo.branches.isEmpty {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                } else if repo.branches.isEmpty {
-                    Button("加载分支") {
-                        onLoadBranches()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                } else {
-                    Menu {
-                        ForEach(repo.branches, id: \.self) { branch in
-                            Button(branch) {
-                                selectedBranch = branch
-                            }
-                        }
-                    } label: {
-                        HStack {
-                            Text(selectedBranch.isEmpty ? "选择分支" : selectedBranch)
-                            Image(systemName: "chevron.down")
-                                .font(.caption)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color(NSColor.controlBackgroundColor))
-                        .clipShape(.rect(cornerRadius: 6))
-                    }
-
-                    Button("确认切换") {
-                        onSwitchBranch(selectedBranch)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(selectedBranch.isEmpty || isWorking)
-                }
-
-                // 展开/收起子模块
-                if !repo.submodules.isEmpty || repo.isMainRepo {
-                    Button {
-                        withAnimation {
-                            expanded.toggle()
-                            if expanded && repo.submodules.isEmpty {
-                                onLoadSubmodules()
-                            }
-                        }
-                    } label: {
-                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                // Stash 指示器
-                if repo.hasStash {
-                    Image(systemName: "archivebox")
+                if repo.isMainRepo {
+                    Text("配置仓库")
+                        .font(.caption)
                         .foregroundStyle(.orange)
-                        .help("有保存的修改")
+                }
+
+                if !repo.isAvailable {
+                    Text("路径不可用")
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
 
                 Spacer()
             }
 
-            // 子模块列表
-            if expanded && !repo.submodules.isEmpty {
-                ForEach(repo.submodules) { submodule in
-                    SubmoduleRowView(
-                        submodule: submodule,
-                        isWorking: isWorking,
-                        onSwitch: { onSwitchSubmodule(submodule) }
-                    )
-                    .padding(.leading, 40)
-                }
+            HStack(spacing: 8) {
+                BranchPill(title: "当前", value: repo.currentBranch, style: .secondary)
+                Image(systemName: "arrow.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                BranchPill(title: "目标", value: repo.targetBranch, style: .blue)
+                Spacer()
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("目标路径:")
+                    .foregroundStyle(.secondary)
+                Text(repo.path)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                Spacer()
+            }
+
+            if repo.hasStash {
+                Label("有本地保存的修改", systemImage: "archivebox")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
         }
-        .padding()
+        .padding(10)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
         .clipShape(.rect(cornerRadius: 8))
-        .onAppear {
-            selectedBranch = repo.targetBranch
-        }
     }
 }
 
-// MARK: - Submodule Row View
+private struct BranchPill: View {
+    enum PillStyle {
+        case secondary
+        case blue
+    }
 
-struct SubmoduleRowView: View {
-    let submodule: Submodule
-    let isWorking: Bool
-    let onSwitch: () -> Void
+    let title: String
+    let value: String
+    let style: PillStyle
 
     var body: some View {
-        HStack(spacing: 12) {
-            // 子模块图标
-            Image(systemName: "arrow.triangle.branch")
-                .foregroundStyle(.green)
-
-            // 子模块名称
-            Text(submodule.name)
-                .font(.subheadline)
-
-            Divider()
-                .frame(height: 16)
-
-            // 当前分支 → 目标分支
-            HStack(spacing: 4) {
-                Text(submodule.currentBranch.isEmpty ? "-" : submodule.currentBranch)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Image(systemName: "arrow.right")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Text(submodule.targetBranch)
-                    .font(.caption)
-                    .foregroundStyle(.blue)
-                    .fontWeight(.medium)
-            }
-
-            // 切换状态
-            HStack(spacing: 4) {
-                if submodule.currentBranch == submodule.targetBranch {
-                    Text("已是目标分支")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                } else {
-                    Button("切换") {
-                        onSwitch()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(isWorking)
-                }
-            }
-
-            Spacer()
+        HStack(spacing: 4) {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Text(value.isEmpty ? "-" : value)
+                .foregroundStyle(style == .blue ? .blue : .primary)
         }
-        .padding(.vertical, 6)
+        .font(.system(.caption, design: .monospaced))
         .padding(.horizontal, 8)
-        .background(Color(NSColor.quaternaryLabelColor).opacity(0.1))
-        .clipShape(.rect(cornerRadius: 4))
+        .padding(.vertical, 4)
+        .background(Color.black.opacity(0.05))
+        .clipShape(.rect(cornerRadius: 6))
     }
 }
 

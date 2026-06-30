@@ -19,25 +19,19 @@ public final class GitSwitcherViewModel {
     private static let maxHistoryCount = 10
 
     public var projectPath: String = ""
+    public var configPath: String = ""
     public var pathHistory: [String] = []
     public var repos: [Repo] = []
     public var isWorking: Bool = false
     public var isLoadingBranches: Bool = false
+    public var switchCompleted: Bool = false
 
     // 新增：分支选择相关
     public var selectedBranch: String = ""
     public var availableBranches: [String] = []
 
     public var hasWorkspace: Bool {
-        guard !projectPath.isEmpty else { return false }
-        let fileManager = FileManager.default
-        let url = URL(fileURLWithPath: projectPath)
-
-        if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
-           matches.contains(where: { $0.pathExtension == "xcworkspace" || $0.pathExtension == "xcodeproj" }) {
-            return true
-        }
-        return false
+        switchCompleted && findXcodeProjectURL() != nil
     }
 
     private let service = GitService()
@@ -48,7 +42,9 @@ public final class GitSwitcherViewModel {
         // 加载上次选择的路径
         if let lastPath = pathHistory.first {
             projectPath = lastPath
-            loadWorkspace(at: lastPath)
+            configPath = configPath(for: lastPath)
+            repos = loadWorkspace(at: lastPath)
+            logReposStatus()
         }
     }
 
@@ -79,12 +75,16 @@ public final class GitSwitcherViewModel {
 
     public func selectHistoryPath(_ path: String) {
         projectPath = path
+        configPath = configPath(for: path)
+        switchCompleted = false
         repos = loadWorkspace(at: path)
         logReposStatus()
     }
 
     private func selectPath(_ path: String) {
         projectPath = path
+        configPath = configPath(for: path)
+        switchCompleted = false
         saveToHistory(path)
         repos = loadWorkspace(at: path)
         logReposStatus()
@@ -92,32 +92,19 @@ public final class GitSwitcherViewModel {
 
     @discardableResult
     private func loadWorkspace(at path: String) -> [Repo] {
-        let configPath = (path as NSString).appendingPathComponent("repos.yaml")
+        let configPath = configPath(for: path)
+        self.configPath = configPath
         guard let config = loadConfig(path: configPath) else { return [] }
         return scanRepos(root: (path as NSString).deletingLastPathComponent, config: config)
     }
 
     public func openInXcode() {
-        guard !projectPath.isEmpty else { return }
-
-        let fileManager = FileManager.default
-        let url = URL(fileURLWithPath: projectPath)
-
-        // 优先查找 workspace
-        if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
-           let workspace = matches.first(where: { $0.pathExtension == "xcworkspace" }) {
-            NSWorkspace.shared.openApplication(at: workspace, configuration: NSWorkspace.OpenConfiguration())
+        guard let projectURL = findXcodeProjectURL() else {
+            LogManager.shared.warning("未找到 xcworkspace 或 xcodeproj")
             return
         }
 
-        // 其次查找 xcodeproj
-        if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
-           let project = matches.first(where: { $0.pathExtension == "xcodeproj" }) {
-            NSWorkspace.shared.openApplication(at: project, configuration: NSWorkspace.OpenConfiguration())
-            return
-        }
-
-        LogManager.shared.warning("未找到 xcworkspace 或 xcodeproj")
+        NSWorkspace.shared.openApplication(at: projectURL, configuration: NSWorkspace.OpenConfiguration())
     }
 
     public func loadConfig(path: String) -> RepoConfig? {
@@ -137,18 +124,30 @@ public final class GitSwitcherViewModel {
         var scannedRepos: [Repo] = []
         for (name, branch) in config.repos {
             let repoPath = (root as NSString).appendingPathComponent(name)
-            let gitPath = (repoPath as NSString).appendingPathComponent(".git")
+            let isAvailable = isGitRepository(at: repoPath)
+            var repo = Repo(
+                name: name,
+                path: repoPath,
+                currentBranch: isAvailable ? "" : "未找到",
+                targetBranch: branch,
+                isMainRepo: name == config.org,
+                isAvailable: isAvailable
+            )
 
-            if FileManager.default.fileExists(atPath: gitPath) {
-                var repo = Repo(name: name, path: repoPath, currentBranch: "", targetBranch: branch)
-                let currentBranch = service.readCurrentBranch(repo: repo)
-                repo.currentBranch = currentBranch
-                repo.isMainRepo = (name == config.org)
+            if isAvailable {
+                repo.currentBranch = service.readCurrentBranch(repo: repo)
                 repo.hasStash = service.hasSavedStash(repo: repo)
-                scannedRepos.append(repo)
             }
+
+            scannedRepos.append(repo)
         }
-        return scannedRepos
+
+        return scannedRepos.sorted { lhs, rhs in
+            if lhs.isMainRepo != rhs.isMainRepo {
+                return lhs.isMainRepo
+            }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
     }
 
     public func logReposStatus() {
@@ -296,6 +295,7 @@ public final class GitSwitcherViewModel {
     public func switchWorkspace() {
         let currentRepos = repos
         isWorking = true
+        switchCompleted = false
 
         Task {
             LogManager.shared.info("========== 开始切换分支 ==========")
@@ -307,10 +307,17 @@ public final class GitSwitcherViewModel {
 
             for (index, repo) in currentRepos.enumerated() {
                 LogManager.shared.info("[\(index + 1)/\(currentRepos.count)] 正在处理: \(repo.name)")
+                LogManager.shared.info("  目标路径: \(repo.path)")
                 LogManager.shared.info("  当前分支: \(repo.currentBranch) -> 目标分支: \(repo.targetBranch)")
 
+                if !repo.isAvailable {
+                    LogManager.shared.error("  结果: 跳过（目标路径不是 Git 仓库）")
+                    failCount += 1
+                    continue
+                }
+
                 if repo.currentBranch == repo.targetBranch {
-                    LogManager.shared.info("  结果: 跳过（已在目标分支）")
+                    LogManager.shared.success("[\(index + 1)] \(repo.name) 已在目标分支，无需切换")
                     skipCount += 1
                     continue
                 }
@@ -341,12 +348,54 @@ public final class GitSwitcherViewModel {
                 }
             }
 
-            LogManager.shared.info("========== 切换完成 ==========")
-            LogManager.shared.info("成功: \(successCount), 跳过: \(skipCount), 失败: \(failCount)")
+            if failCount == 0 {
+                LogManager.shared.success("========== 私版券商切换成功 ==========")
+                LogManager.shared.success("成功: \(successCount), 已是目标分支: \(skipCount), 失败: 0")
+            } else {
+                LogManager.shared.error("========== 私版券商切换完成，失败 \(failCount) 个 ==========")
+                LogManager.shared.info("成功: \(successCount), 已是目标分支: \(skipCount), 失败: \(failCount)")
+            }
 
             await MainActor.run {
+                self.repos = self.loadWorkspace(at: self.projectPath)
                 self.isWorking = false
+                self.switchCompleted = true
             }
         }
+    }
+
+    private func configPath(for path: String) -> String {
+        (path as NSString).appendingPathComponent("repos.yaml")
+    }
+
+    private func isGitRepository(at path: String) -> Bool {
+        let fileManager = FileManager.default
+        let gitPath = (path as NSString).appendingPathComponent(".git")
+        if fileManager.fileExists(atPath: gitPath) {
+            return true
+        }
+
+        return (try? ProcessRunner.run("git rev-parse --is-inside-work-tree", at: path))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+    }
+
+    private func findXcodeProjectURL() -> URL? {
+        let searchPaths = [projectPath] + repos.map(\.path)
+        for path in searchPaths where !path.isEmpty {
+            let url = URL(fileURLWithPath: path, isDirectory: true)
+            guard let matches = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else {
+                continue
+            }
+
+            if let workspace = matches.first(where: { $0.pathExtension == "xcworkspace" }) {
+                return workspace
+            }
+
+            if let project = matches.first(where: { $0.pathExtension == "xcodeproj" }) {
+                return project
+            }
+        }
+
+        return nil
     }
 }

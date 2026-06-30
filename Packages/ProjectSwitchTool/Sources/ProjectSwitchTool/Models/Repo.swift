@@ -39,6 +39,7 @@ public struct Repo: Identifiable, Sendable {
     public var targetBranch: String
     public var branches: [String] = []
     public var isMainRepo: Bool = false
+    public var isAvailable: Bool = true
     public var submodules: [Submodule] = []
     public var hasStash: Bool = false
 
@@ -50,6 +51,7 @@ public struct Repo: Identifiable, Sendable {
         targetBranch: String,
         branches: [String] = [],
         isMainRepo: Bool = false,
+        isAvailable: Bool = true,
         submodules: [Submodule] = [],
         hasStash: Bool = false
     ) {
@@ -60,6 +62,7 @@ public struct Repo: Identifiable, Sendable {
         self.targetBranch = targetBranch
         self.branches = branches
         self.isMainRepo = isMainRepo
+        self.isAvailable = isAvailable
         self.submodules = submodules
         self.hasStash = hasStash
     }

@@ -60,6 +60,62 @@ final class RepoConfigTests: XCTestCase {
     }
 }
 
+@MainActor
+final class GitSwitcherViewModelTests: XCTestCase {
+    func testInitLoadsReposFromLastHistoryPath() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let configRepoURL = tempRoot.appendingPathComponent("config-repo")
+        try FileManager.default.createDirectory(at: configRepoURL, withIntermediateDirectories: true)
+        let yaml = """
+        org: config-repo
+        repos:
+          config-repo: develop
+          feature-repo: release/1.0
+        """
+        try yaml.write(to: configRepoURL.appendingPathComponent("repos.yaml"), atomically: true, encoding: .utf8)
+        UserDefaults.standard.set([configRepoURL.path], forKey: "GitSwitcher.pathHistory")
+        defer {
+            UserDefaults.standard.removeObject(forKey: "GitSwitcher.pathHistory")
+            try? FileManager.default.removeItem(at: tempRoot)
+        }
+
+        let viewModel = GitSwitcherViewModel()
+
+        XCTAssertEqual(viewModel.projectPath, configRepoURL.path)
+        XCTAssertEqual(viewModel.configPath, configRepoURL.appendingPathComponent("repos.yaml").path)
+        XCTAssertEqual(viewModel.repos.count, 2)
+        XCTAssertEqual(viewModel.repos.first?.name, "config-repo")
+        XCTAssertEqual(viewModel.repos.first?.targetBranch, "develop")
+    }
+
+    func testScanReposKeepsConfiguredReposWhenPathIsMissing() {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let config = RepoConfig(
+            org: "main-repo",
+            repos: [
+                "feature-repo": "release/1.0",
+                "main-repo": "develop"
+            ]
+        )
+        let viewModel = GitSwitcherViewModel()
+
+        let repos = viewModel.scanRepos(root: tempDir.path, config: config)
+
+        XCTAssertEqual(repos.count, 2)
+        XCTAssertEqual(repos.first?.name, "main-repo")
+        XCTAssertEqual(repos.first?.path, tempDir.appendingPathComponent("main-repo").path)
+        XCTAssertEqual(repos.first?.targetBranch, "develop")
+        XCTAssertEqual(repos.first?.currentBranch, "未找到")
+        XCTAssertEqual(repos.first?.isMainRepo, true)
+        XCTAssertEqual(repos.first?.isAvailable, false)
+
+        let featureRepo = repos.first { $0.name == "feature-repo" }
+        XCTAssertEqual(featureRepo?.path, tempDir.appendingPathComponent("feature-repo").path)
+        XCTAssertEqual(featureRepo?.targetBranch, "release/1.0")
+        XCTAssertEqual(featureRepo?.isAvailable, false)
+    }
+}
+
 final class ProcessRunnerTests: XCTestCase {
     func testRunEchoCommand() throws {
         let result = try ProcessRunner.run("echo 'hello'", at: "/tmp")
@@ -297,7 +353,7 @@ final class GitServiceTests: XCTestCase {
         """
 
         let gitmodulesPath = tempDir.appendingPathComponent(".gitmodules")
-        try gitmodulesContent.write(toFile: gitmodulesPath, atomically: true, encoding: .utf8)
+        try gitmodulesContent.write(to: gitmodulesPath, atomically: true, encoding: .utf8)
 
         // 创建子模块目录
         let submoduleDir = tempDir.appendingPathComponent("TestSubmodule")

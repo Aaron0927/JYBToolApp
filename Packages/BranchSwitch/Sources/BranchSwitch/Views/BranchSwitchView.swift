@@ -15,7 +15,7 @@ public struct BranchSwitchView: View {
                     Image(systemName: "arrow.triangle.branch")
                         .font(.title)
                         .foregroundStyle(.blue)
-                    Text("公版分支切换")
+                    Text("主仓库子模块切换")
                         .font(.title2)
                         .fontWeight(.semibold)
                     Spacer()

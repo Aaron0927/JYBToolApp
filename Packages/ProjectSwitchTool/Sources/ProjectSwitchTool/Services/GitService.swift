@@ -77,7 +77,7 @@ public final class GitService {
                         targetBranch: targetBranch
                     ))
                 }
-                currentSubmodule = [:]
+                currentSubmodule = ["name": extractSubmoduleName(trimmed)]
             } else if trimmed.hasPrefix("path") {
                 currentSubmodule["path"] = extractValue(trimmed)
             } else if trimmed.hasPrefix("url") {
@@ -107,6 +107,16 @@ public final class GitService {
         return String(line[line.index(after: equalIndex)...]).trimmingCharacters(in: .whitespaces)
     }
 
+    private func extractSubmoduleName(_ line: String) -> String {
+        guard let firstQuote = line.firstIndex(of: "\""),
+              let lastQuote = line.lastIndex(of: "\""),
+              firstQuote < lastQuote else {
+            return ""
+        }
+
+        return String(line[line.index(after: firstQuote)..<lastQuote])
+    }
+
     private func getSubmoduleCurrentBranch(path: String) -> String {
         let gitPath = (path as NSString).appendingPathComponent(".git")
         guard FileManager.default.fileExists(atPath: gitPath) else { return "unknown" }
@@ -130,8 +140,8 @@ public final class GitService {
             _ = try? ProcessRunner.run("git checkout \(submodule.targetBranch)", at: submodulePath)
         } else {
             // 子模块未初始化，先设置跟踪分支再更新
-            try ProcessRunner.run("git submodule set-branch --branch \(submodule.targetBranch) \(submodule.path)", at: repo.path)
-            try ProcessRunner.run("git submodule update --init \(submodule.path)", at: repo.path)
+            _ = try ProcessRunner.run("git submodule set-branch --branch \(submodule.targetBranch) \(submodule.path)", at: repo.path)
+            _ = try ProcessRunner.run("git submodule update --init \(submodule.path)", at: repo.path)
             // 更新完后再切换到目标分支（因为 update --init 可能不会切到最新分支）
             _ = try? ProcessRunner.run("git checkout \(submodule.targetBranch)", at: submodulePath)
         }
@@ -206,7 +216,7 @@ public final class GitService {
         let stashFilePath = (stashPath as NSString).appendingPathComponent(stashFileName)
 
         // 创建 stash 并获取 stash 引用
-        let stashRef = try ProcessRunner.run("git stash push -u -m \"\(currentBranch)_\(timestamp)\"", at: repo.path)
+        _ = try ProcessRunner.run("git stash push -u -m \"\(currentBranch)_\(timestamp)\"", at: repo.path)
 
         // 获取 stash 内容并保存
         let stashList = try ProcessRunner.run("git stash list", at: repo.path)
