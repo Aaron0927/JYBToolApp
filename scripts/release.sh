@@ -1,14 +1,48 @@
 #!/bin/bash
-# 用法: ./scripts/release.sh 1.2.3
+# 用法:
+#   ./scripts/release.sh 1.2.4
+#   ./scripts/release.sh --yes        # 自动基于最新 tag 递增 patch
+#   ./scripts/release.sh 1.2.4 --yes  # 非交互确认
 set -e
 
-VERSION=$1
 PROJECT="JYBToolApp.xcodeproj/project.pbxproj"
+ASSUME_YES=false
+VERSION=""
+
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes)
+            ASSUME_YES=true
+            ;;
+        *)
+            if [ -z "$VERSION" ]; then
+                VERSION=$arg
+            else
+                echo "错误: 未识别参数 $arg"
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+next_patch_version() {
+    local latest_tag
+    latest_tag=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+    if [ -z "$latest_tag" ]; then
+        echo "1.0.0"
+        return
+    fi
+
+    local latest="${latest_tag#v}"
+    local major minor patch
+    IFS='.' read -r major minor patch <<< "$latest"
+    echo "$major.$minor.$((patch + 1))"
+}
 
 # ── 参数校验 ──────────────────────────────────────────────────────────────────
 if [ -z "$VERSION" ]; then
-    echo "用法: $0 <版本号>   例: $0 1.2.3"
-    exit 1
+    VERSION=$(next_patch_version)
+    echo "未指定版本号，自动使用下一个 patch 版本: $VERSION"
 fi
 
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -32,16 +66,25 @@ if [ -n "$UNSTAGED" ]; then
     echo "警告: 存在未提交的改动:"
     echo "$UNSTAGED"
     echo ""
-    read -r -p "继续发版? (y/N) " confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        echo "已取消"
-        exit 0
+    if [ "$ASSUME_YES" = true ]; then
+        echo "已指定 --yes，继续发版"
+    else
+        read -r -p "继续发版? (y/N) " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "已取消"
+            exit 0
+        fi
     fi
 fi
 
-# ── 1. 更新 Xcode 版本号 ──────────────────────────────────────────────────────
+# ── 1. 同步远程（确保基于最新 main 发版） ─────────────────────────────────────
 echo ""
-echo "▸ [1/5] 更新版本号..."
+echo "▸ [1/5] 同步远程..."
+git pull --rebase --autostash origin main
+
+# ── 2. 更新 Xcode 版本号 ──────────────────────────────────────────────────────
+echo ""
+echo "▸ [2/5] 更新版本号..."
 sed -i '' "s/MARKETING_VERSION = .*;/MARKETING_VERSION = $VERSION;/g" "$PROJECT"
 sed -i '' "s/CURRENT_PROJECT_VERSION = .*;/CURRENT_PROJECT_VERSION = $BUILD;/g" "$PROJECT"
 
@@ -54,27 +97,11 @@ fi
 echo "  MARKETING_VERSION  → $VERSION"
 echo "  CURRENT_PROJECT_VERSION → $BUILD"
 
-# ── 2. 提交 ──────────────────────────────────────────────────────────────────
+# ── 3. 提交 ──────────────────────────────────────────────────────────────────
 echo ""
-echo "▸ [2/5] 提交版本变更..."
+echo "▸ [3/5] 提交版本变更..."
 git add "$PROJECT"
 git commit -m "feat: 版本更新至 $VERSION"
-
-# ── 3. 同步远程（处理远程有新提交的情况） ─────────────────────────────────────
-echo ""
-echo "▸ [3/5] 同步远程..."
-# 暂存任何残留的未暂存改动（如 build 产物删除标记）
-STASHED=false
-if ! git diff --quiet; then
-    git stash push -m "release-script: temp stash"
-    STASHED=true
-fi
-
-git pull --rebase origin main
-
-if [ "$STASHED" = true ]; then
-    git stash pop || true
-fi
 
 # ── 4. 推送 main ──────────────────────────────────────────────────────────────
 echo ""
