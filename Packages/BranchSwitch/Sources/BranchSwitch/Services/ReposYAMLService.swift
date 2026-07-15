@@ -176,6 +176,20 @@ public final class ReposYAMLService: Sendable {
     return (config, rootURL.path, infos)
   }
 
+  public func makeWorkspaceRepoInfo(rootPath: String, targetBranch: String) -> RepoSwitchInfo {
+    let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true).standardizedFileURL
+    let isRepo = isGitRepository(at: rootURL.path)
+    return RepoSwitchInfo(
+      name: rootURL.lastPathComponent,
+      path: ".",
+      absolutePath: rootURL.path,
+      currentBranch: isRepo ? (getCurrentBranch(at: rootURL.path) ?? "unknown") : "非 Git 仓库",
+      targetBranch: targetBranch,
+      isCloned: isRepo,
+      scope: .workspace
+    )
+  }
+
   public func parseLocalBranches(from output: String) -> [String] {
     output
       .split(separator: "\n")
@@ -230,32 +244,31 @@ public final class ReposYAMLService: Sendable {
         throw ReposYAMLServiceError.notGitRepository(repoURL.path)
       }
 
-      let hadChanges = hasTrackedChanges(at: repoURL.path)
-      if hadChanges {
-        logger("\(repo.name) 检测到未提交更改，自动暂存")
-        try stash(at: repoURL.path)
-      }
-
-      do {
-        try checkout(repo.branch, at: repoURL.path, logger: logger)
-        try pull(repo.branch, at: repoURL.path, logger: logger)
-      } catch {
-        if hadChanges {
-          logger("\(repo.name) 切换失败，尝试恢复暂存")
-          try? stashPop(at: repoURL.path)
-        }
-        throw error
-      }
-
-      if hadChanges {
-        logger("\(repo.name) 恢复暂存")
-        try stashPop(at: repoURL.path)
-      }
-
+      try updateGitRepository(name: repo.name, path: repoURL.path, branch: repo.branch, logger: logger)
       logger("\(repo.name) 完成")
       return RepoSwitchResult(name: repo.name, success: true)
     } catch {
       return RepoSwitchResult(name: repo.name, success: false, error: error.localizedDescription)
+    }
+  }
+
+  public func updateExistingRepo(
+    name: String,
+    path: String,
+    branch: String,
+    logger: @escaping @Sendable (String) -> Void
+  ) -> RepoSwitchResult {
+    do {
+      logger("开始处理 \(name)")
+      guard isGitRepository(at: path) else {
+        throw ReposYAMLServiceError.notGitRepository(path)
+      }
+
+      try updateGitRepository(name: name, path: path, branch: branch, logger: logger)
+      logger("\(name) 完成")
+      return RepoSwitchResult(name: name, success: true)
+    } catch {
+      return RepoSwitchResult(name: name, success: false, error: error.localizedDescription)
     }
   }
 
@@ -288,7 +301,7 @@ public final class ReposYAMLService: Sendable {
     )
   }
 
-  private func isGitRepository(at path: String) -> Bool {
+  public func isGitRepository(at path: String) -> Bool {
     let gitPath = URL(fileURLWithPath: path, isDirectory: true).appending(path: ".git").path
     if FileManager.default.fileExists(atPath: gitPath) {
       return true
@@ -304,6 +317,35 @@ public final class ReposYAMLService: Sendable {
       return output.split(separator: "\n").contains { !$0.hasPrefix("??") }
     } catch {
       return false
+    }
+  }
+
+  private func updateGitRepository(
+    name: String,
+    path: String,
+    branch: String,
+    logger: @escaping @Sendable (String) -> Void
+  ) throws {
+    let hadChanges = hasTrackedChanges(at: path)
+    if hadChanges {
+      logger("\(name) 检测到未提交更改，自动暂存")
+      try stash(at: path)
+    }
+
+    do {
+      try checkout(branch, at: path, logger: logger)
+      try pull(branch, at: path, logger: logger)
+    } catch {
+      if hadChanges {
+        logger("\(name) 切换失败，尝试恢复暂存")
+        try? stashPop(at: path)
+      }
+      throw error
+    }
+
+    if hadChanges {
+      logger("\(name) 恢复暂存")
+      try stashPop(at: path)
     }
   }
 

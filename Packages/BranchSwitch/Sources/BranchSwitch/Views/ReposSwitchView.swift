@@ -38,7 +38,7 @@ public struct ReposSwitchView: View {
         Spacer()
       }
 
-      Text("读取 fastlane/repos.yml，并按配置切换或克隆各依赖仓库")
+      Text("切换父工作区，并读取 fastlane/repos.yml 同步各依赖仓库")
         .font(.subheadline)
         .foregroundStyle(.secondary)
     }
@@ -143,7 +143,7 @@ public struct ReposSwitchView: View {
     } else {
       VStack(alignment: .leading, spacing: 10) {
         HStack {
-          Text("依赖仓库")
+          Text("切换仓库")
             .font(.headline)
           Text("\(viewModel.repos.count)")
             .foregroundStyle(.secondary)
@@ -188,14 +188,14 @@ private struct RepoSwitchRow: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 10) {
-        Image(systemName: repo.isCloned ? "checkmark.circle.fill" : "arrow.down.circle")
-          .foregroundStyle(repo.isCloned ? .green : .orange)
+        Image(systemName: iconName)
+          .foregroundStyle(statusColor)
         Text(repo.name)
           .font(.headline)
         Spacer()
-        Text(repo.isCloned ? "已存在" : "待克隆")
+        Text(statusText)
           .font(.caption)
-          .foregroundStyle(repo.isCloned ? .green : .orange)
+          .foregroundStyle(statusColor)
       }
 
       HStack(spacing: 8) {
@@ -214,6 +214,27 @@ private struct RepoSwitchRow: View {
     .padding(10)
     .background(Color.black.opacity(0.04))
     .clipShape(.rect(cornerRadius: 8))
+  }
+
+  private var iconName: String {
+    if repo.scope == .workspace {
+      return "folder.badge.gearshape"
+    }
+    return repo.isCloned ? "checkmark.circle.fill" : "arrow.down.circle"
+  }
+
+  private var statusText: String {
+    if repo.scope == .workspace {
+      return repo.isCloned ? "父工作区" : "非 Git 仓库"
+    }
+    return repo.isCloned ? "已存在" : "待克隆"
+  }
+
+  private var statusColor: Color {
+    if repo.scope == .workspace {
+      return repo.isCloned ? .purple : .red
+    }
+    return repo.isCloned ? .green : .orange
   }
 }
 

@@ -118,10 +118,11 @@ public final class ReposSwitchViewModel {
             }
           }
           let loaded = try service.loadRepoInfos(atProjectPath: currentProjectPath)
+          let workspaceInfo = service.makeWorkspaceRepoInfo(rootPath: loaded.rootPath, targetBranch: branch)
           return LoadResult(
             config: loaded.config,
             rootPath: loaded.rootPath,
-            repos: loaded.infos,
+            repos: [workspaceInfo] + loaded.infos,
             currentBranch: branch,
             error: nil
           )
@@ -150,13 +151,32 @@ public final class ReposSwitchViewModel {
 
     let currentConfig = loadedConfig
     let currentConfigURL = service.configURL(forProjectPath: projectPath)
+    let workspaceRootPath = rootPath
+    let workspaceTargetBranch = selectedBranch
     let maxConcurrentCount = Self.maxConcurrentRepoSwitchCount
     currentTask = Task { @MainActor in
       let results = await Task.detached { () async -> [RepoSwitchResult] in
         let service = ReposYAMLService()
         let rootURL = service.rootURL(for: currentConfig, configURL: currentConfigURL)
+        var orderedResults: [RepoSwitchResult] = []
 
-        return await withTaskGroup(of: (Int, RepoSwitchResult).self) { group in
+        if !workspaceRootPath.isEmpty {
+          let workspaceName = URL(fileURLWithPath: workspaceRootPath, isDirectory: true)
+            .standardizedFileURL
+            .lastPathComponent
+          let workspaceResult = service.updateExistingRepo(
+            name: workspaceName,
+            path: workspaceRootPath,
+            branch: workspaceTargetBranch
+          ) { message in
+            Task { @MainActor in
+              LogManager.shared.debug(message)
+            }
+          }
+          orderedResults.append(workspaceResult)
+        }
+
+        let dependencyResults = await withTaskGroup(of: (Int, RepoSwitchResult).self) { group in
           let indexedRepos = Array(currentConfig.repos.enumerated())
           var nextIndex = 0
           var results: [(Int, RepoSwitchResult)] = []
@@ -192,6 +212,9 @@ public final class ReposSwitchViewModel {
             .sorted { $0.0 < $1.0 }
             .map { $0.1 }
         }
+
+        orderedResults.append(contentsOf: dependencyResults)
+        return orderedResults
       }.value
 
       finishSwitch(results)

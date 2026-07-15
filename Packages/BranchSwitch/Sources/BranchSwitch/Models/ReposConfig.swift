@@ -31,6 +31,11 @@ public struct ReposConfig: Equatable, Sendable {
   }
 }
 
+public enum RepoSwitchScope: String, Equatable, Sendable {
+  case workspace
+  case dependency
+}
+
 public struct RepoSwitchInfo: Identifiable, Equatable, Sendable {
   public let name: String
   public let path: String
@@ -38,6 +43,7 @@ public struct RepoSwitchInfo: Identifiable, Equatable, Sendable {
   public let currentBranch: String
   public let targetBranch: String
   public let isCloned: Bool
+  public let scope: RepoSwitchScope
 
   public init(
     name: String,
@@ -45,7 +51,8 @@ public struct RepoSwitchInfo: Identifiable, Equatable, Sendable {
     absolutePath: String,
     currentBranch: String,
     targetBranch: String,
-    isCloned: Bool
+    isCloned: Bool,
+    scope: RepoSwitchScope = .dependency
   ) {
     self.name = name
     self.path = path
@@ -53,7 +60,8 @@ public struct RepoSwitchInfo: Identifiable, Equatable, Sendable {
     self.currentBranch = currentBranch
     self.targetBranch = targetBranch
     self.isCloned = isCloned
+    self.scope = scope
   }
 
-  public var id: String { path }
+  public var id: String { "\(scope.rawValue):\(path)" }
 }
