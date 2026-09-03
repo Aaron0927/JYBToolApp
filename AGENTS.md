@@ -69,6 +69,7 @@
 - 将不同的类型拆分为不同的 Swift 文件，而不是将多个结构体、类或枚举放在单个文件中
 - 为核心应用逻辑编写单元测试
 - 仅在单元测试不可能时才编写 UI 测试
+- 每次新增或修改功能时，必须补充必要的测试，并确保相关测试通过
 - 根据需要添加代码注释和文档注释
 - 如果项目需要 API 密钥等 secrets，永远不要将它们包含在仓库中
 - 如果项目使用 Localizable.xcstrings，优先使用符号键（例如 helloWorld）在字符串目录中添加面向用户的字符串，并将 `extractionState` 设置为 "manual"，通过生成的符号访问它们，例如 `Text(.helloWorld)`。将新键翻译成项目支持的所有语言。
@@ -118,6 +119,7 @@ xcodebuild test -project JYBToolApp.xcodeproj -scheme JYBToolApp -only-testing:T
 ## PR 指令
 
 - 如果安装了 SwiftLint，确保提交前没有警告或错误。
+- 每次完成一个功能后，必须使用 Git 提交本次功能的相关改动。
 
 ## Xcode MCP
 
