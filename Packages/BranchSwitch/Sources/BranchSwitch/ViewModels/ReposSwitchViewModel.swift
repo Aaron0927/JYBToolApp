@@ -22,7 +22,9 @@ public final class ReposSwitchViewModel {
   public var repos: [RepoSwitchInfo] = []
   public var isLoading = false
   public var isSwitching = false
+  public var isPulling = false
   public var isConfirmEnabled = false
+  public var pullSummary: String?
 
   private let service = ReposYAMLService()
   private var currentTask: Task<Void, Never>?
@@ -48,6 +50,10 @@ public final class ReposSwitchViewModel {
     }
 
     return false
+  }
+
+  public var isBusy: Bool {
+    isLoading || isSwitching || isPulling
   }
 
   public func selectProject() {
@@ -221,6 +227,32 @@ public final class ReposSwitchViewModel {
     }
   }
 
+  public func pullAllRepositories() {
+    guard !projectPath.isEmpty else { return }
+    currentTask?.cancel()
+    isPulling = true
+    pullSummary = nil
+    LogManager.shared.info("========== 开始拉取公版全部仓库 ==========")
+
+    let currentProjectPath = projectPath
+    currentTask = Task { @MainActor in
+      let result = await Task.detached { () -> PullResult in
+        do {
+          let results = try ReposYAMLService().pullAllRepositories(atProjectPath: currentProjectPath) { message in
+            Task { @MainActor in
+              LogManager.shared.debug(message)
+            }
+          }
+          return PullResult(results: results, error: nil)
+        } catch {
+          return PullResult(results: [], error: error.localizedDescription)
+        }
+      }.value
+
+      finishPull(result)
+    }
+  }
+
   public func openInXcode() {
     guard !projectPath.isEmpty else { return }
 
@@ -312,6 +344,37 @@ public final class ReposSwitchViewModel {
     loadData()
   }
 
+  private func finishPull(_ result: PullResult) {
+    defer {
+      isPulling = false
+      currentTask = nil
+    }
+
+    if let error = result.error {
+      pullSummary = "拉取失败：\(error)"
+      LogManager.shared.error("========== 拉取失败：\(error) ==========")
+      return
+    }
+
+    for repo in result.results {
+      switch repo.status {
+      case .success:
+        let stashNote = repo.hadAutoStash ? "，已恢复本地改动" : ""
+        LogManager.shared.success("✓ \(repo.name) 拉取成功\(stashNote)")
+      case .skipped:
+        LogManager.shared.info("- \(repo.name) 已跳过：\(repo.message ?? "未知原因")")
+      case .failed:
+        LogManager.shared.error("✗ \(repo.name) 拉取失败：\(repo.message ?? "未知错误")")
+      }
+    }
+
+    let successCount = result.results.filter { $0.status == .success }.count
+    let skippedCount = result.results.filter { $0.status == .skipped }.count
+    let failedCount = result.results.filter { $0.status == .failed }.count
+    pullSummary = "最近拉取：成功 \(successCount)，跳过 \(skippedCount)，失败 \(failedCount)"
+    LogManager.shared.info("========== \(pullSummary ?? "拉取完成") ==========")
+  }
+
   private func saveLastProjectPath() {
     UserDefaults.standard.set(projectPath, forKey: Self.lastProjectPathKey)
   }
@@ -346,6 +409,11 @@ public final class ReposSwitchViewModel {
   private struct BranchLoadResult: Sendable {
     let branches: [String]
     let currentBranch: String
+    let error: String?
+  }
+
+  private struct PullResult: Sendable {
+    let results: [RepoPullResult]
     let error: String?
   }
 }

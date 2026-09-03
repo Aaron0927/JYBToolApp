@@ -40,6 +40,34 @@ public struct RepoSwitchResult: Sendable {
   }
 }
 
+public enum RepoPullStatus: Equatable, Sendable {
+  case success
+  case skipped
+  case failed
+}
+
+public struct RepoPullResult: Sendable {
+  public let name: String
+  public let path: String
+  public let status: RepoPullStatus
+  public let hadAutoStash: Bool
+  public let message: String?
+
+  public init(
+    name: String,
+    path: String,
+    status: RepoPullStatus,
+    hadAutoStash: Bool = false,
+    message: String? = nil
+  ) {
+    self.name = name
+    self.path = path
+    self.status = status
+    self.hadAutoStash = hadAutoStash
+    self.message = message
+  }
+}
+
 public final class ReposYAMLService: Sendable {
   private let processRunner: ProcessRunner
 
@@ -176,6 +204,31 @@ public final class ReposYAMLService: Sendable {
     return (config, rootURL.path, infos)
   }
 
+  public func pullAllRepositories(
+    atProjectPath projectPath: String,
+    logger: @escaping @Sendable (String) -> Void
+  ) throws -> [RepoPullResult] {
+    let configURL = configURL(forProjectPath: projectPath)
+    let initialConfig = try loadConfig(atProjectPath: projectPath)
+    let initialRootURL = rootURL(for: initialConfig, configURL: configURL)
+    var results: [RepoPullResult] = []
+
+    results.append(pullRepository(
+      name: initialRootURL.lastPathComponent,
+      path: initialRootURL.path,
+      logger: logger
+    ))
+
+    let updatedConfig = try loadConfig(atProjectPath: projectPath)
+    let updatedRootURL = rootURL(for: updatedConfig, configURL: configURL)
+    for repo in updatedConfig.repos {
+      let repoURL = repoURL(for: repo, rootURL: updatedRootURL)
+      results.append(pullRepository(name: repo.name, path: repoURL.path, logger: logger))
+    }
+
+    return results
+  }
+
   public func makeWorkspaceRepoInfo(rootPath: String, targetBranch: String) -> RepoSwitchInfo {
     let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true).standardizedFileURL
     let isRepo = isGitRepository(at: rootURL.path)
@@ -279,6 +332,148 @@ public final class ReposYAMLService: Sendable {
     } catch {
       return nil
     }
+  }
+
+  private func pullRepository(
+    name: String,
+    path: String,
+    logger: @escaping @Sendable (String) -> Void
+  ) -> RepoPullResult {
+    guard isGitRepository(at: path) else {
+      return RepoPullResult(
+        name: name,
+        path: path,
+        status: .skipped,
+        message: "本地仓库不存在或不是 Git 仓库"
+      )
+    }
+
+    do {
+      let branch = try currentBranchForPull(at: path)
+      guard !branch.isEmpty else {
+        return RepoPullResult(name: name, path: path, status: .skipped, message: "仓库处于 detached HEAD 状态")
+      }
+
+      guard let upstream = upstreamBranch(at: path), !upstream.isEmpty else {
+        return RepoPullResult(name: name, path: path, status: .skipped, message: "当前分支未配置 upstream")
+      }
+
+      guard remoteBranchExists(upstream: upstream, at: path) else {
+        return RepoPullResult(name: name, path: path, status: .skipped, message: "远程对应分支不存在")
+      }
+
+      logger("开始拉取 \(name) 的 \(branch)")
+      let stashReference = try createAutoStashIfNeeded(name: name, at: path, logger: logger)
+      var failureMessages: [String] = []
+
+      do {
+        _ = try processRunner.run("git pull --ff-only", at: path, timeout: 180)
+        logger("\(name) 拉取完成")
+      } catch {
+        failureMessages.append("拉取失败: \(error.localizedDescription)")
+      }
+
+      if let stashReference {
+        do {
+          try restoreAutoStash(stashReference, name: name, at: path, logger: logger)
+        } catch {
+          failureMessages.append("恢复暂存失败，已保留 \(stashReference): \(error.localizedDescription)")
+        }
+      }
+
+      if failureMessages.isEmpty {
+        return RepoPullResult(name: name, path: path, status: .success, hadAutoStash: stashReference != nil)
+      }
+
+      return RepoPullResult(
+        name: name,
+        path: path,
+        status: .failed,
+        hadAutoStash: stashReference != nil,
+        message: failureMessages.joined(separator: "；")
+      )
+    } catch {
+      return RepoPullResult(name: name, path: path, status: .failed, message: error.localizedDescription)
+    }
+  }
+
+  private func currentBranchForPull(at path: String) throws -> String {
+    try processRunner.run("git branch --show-current", at: path)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func upstreamBranch(at path: String) -> String? {
+    (try? processRunner.run("git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}'", at: path))?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func remoteBranchExists(upstream: String, at path: String) -> Bool {
+    let parts = upstream.split(separator: "/", maxSplits: 1).map(String.init)
+    guard parts.count == 2 else { return false }
+
+    let output = try? processRunner.run(
+      "git ls-remote --heads \(shellEscaped(parts[0])) \(shellEscaped(parts[1]))",
+      at: path,
+      timeout: 60
+    )
+    return !(output?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+  }
+
+  private func createAutoStashIfNeeded(
+    name: String,
+    at path: String,
+    logger: @escaping @Sendable (String) -> Void
+  ) throws -> String? {
+    let status = try processRunner.run("git status --porcelain", at: path)
+    guard !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return nil
+    }
+
+    let previousReference = stashReference(at: path)
+    logger("\(name) 检测到未提交改动，自动暂存")
+    _ = try processRunner.run(
+      "git stash push --include-untracked -m 'JYBToolApp: auto-stash before pull'",
+      at: path
+    )
+
+    guard let newReference = stashReference(at: path), newReference != previousReference else {
+      throw ProcessRunnerError.executionFailed("自动暂存未生成新的 stash")
+    }
+    return newReference
+  }
+
+  private func restoreAutoStash(
+    _ reference: String,
+    name: String,
+    at path: String,
+    logger: @escaping @Sendable (String) -> Void
+  ) throws {
+    logger("恢复 \(name) 的自动暂存")
+    _ = try processRunner.run("git stash apply \(shellEscaped(reference))", at: path)
+    guard let stashEntry = stashEntry(for: reference, at: path) else {
+      throw ProcessRunnerError.executionFailed("未找到需要删除的自动暂存: \(reference)")
+    }
+    _ = try processRunner.run("git stash drop \(shellEscaped(stashEntry))", at: path)
+  }
+
+  private func stashReference(at path: String) -> String? {
+    let output = try? processRunner.run("git rev-parse --verify refs/stash", at: path)
+    let reference = output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return reference.isEmpty ? nil : reference
+  }
+
+  private func stashEntry(for reference: String, at path: String) -> String? {
+    guard let output = try? processRunner.run("git stash list --format='%H %gd'", at: path) else {
+      return nil
+    }
+
+    for line in output.split(separator: "\n") {
+      let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
+      if parts.count == 2, parts[0] == reference {
+        return parts[1]
+      }
+    }
+    return nil
   }
 
   private func ensureRepoExists(

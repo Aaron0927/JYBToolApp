@@ -59,19 +59,25 @@ public struct ReposSwitchView: View {
       Button("浏览", systemImage: "folder") {
         viewModel.selectProject()
       }
-      .disabled(viewModel.isLoading || viewModel.isSwitching)
+      .disabled(viewModel.isBusy)
 
       Button("刷新分支", systemImage: "arrow.clockwise") {
         viewModel.loadBranches()
       }
-      .disabled(viewModel.projectPath.isEmpty || viewModel.isLoading || viewModel.isSwitching)
+      .disabled(viewModel.projectPath.isEmpty || viewModel.isBusy)
+
+      Button("拉取全部最新代码", systemImage: "arrow.down.to.line.compact") {
+        viewModel.pullAllRepositories()
+      }
+      .buttonStyle(.borderedProminent)
+      .disabled(viewModel.projectPath.isEmpty || viewModel.isBusy)
 
       Button("在 Xcode 中打开", systemImage: "hammer") {
         viewModel.openInXcode()
       }
-      .disabled(!viewModel.hasWorkspace || viewModel.isLoading || viewModel.isSwitching)
+      .disabled(!viewModel.hasWorkspace || viewModel.isBusy)
 
-      if viewModel.isLoading || viewModel.isSwitching {
+      if viewModel.isBusy {
         ProgressView()
           .scaleEffect(0.8)
       }
@@ -108,7 +114,7 @@ public struct ReposSwitchView: View {
           viewModel.loadData()
         }
         .buttonStyle(.borderedProminent)
-        .disabled(viewModel.selectedBranch.isEmpty || viewModel.isLoading || viewModel.isSwitching)
+        .disabled(viewModel.selectedBranch.isEmpty || viewModel.isBusy)
       }
       .padding(.horizontal)
     }
@@ -121,6 +127,9 @@ public struct ReposSwitchView: View {
         labeledValue(title: "配置文件：", value: viewModel.configPath)
         if !viewModel.rootPath.isEmpty {
           labeledValue(title: "根目录：", value: viewModel.rootPath)
+        }
+        if let pullSummary = viewModel.pullSummary {
+          labeledValue(title: "拉取结果：", value: pullSummary)
         }
       }
       .padding(.horizontal)
@@ -152,7 +161,7 @@ public struct ReposSwitchView: View {
             viewModel.switchRepos()
           }
           .buttonStyle(.borderedProminent)
-          .disabled(!viewModel.isConfirmEnabled || viewModel.isLoading || viewModel.isSwitching)
+          .disabled(!viewModel.isConfirmEnabled || viewModel.isBusy)
         }
 
         ScrollView {
