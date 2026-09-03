@@ -74,10 +74,6 @@ jobs:
             --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" \
             sparkle
 
-      - name: Update appcast.xml in docs
-        run: |
-          cp sparkle/appcast.xml docs/appcast.xml
-
       - name: Commit appcast.xml
         run: |
           git config --local user.email "action@github.com"
