@@ -3,12 +3,12 @@
     <channel>
         <title>JYBToolApp</title>
         <item>
-            <title>1.2.6</title>
-            <pubDate>Thu, 03 Sep 2026 02:33:03 +0000</pubDate>
-            <sparkle:version>20260903</sparkle:version>
-            <sparkle:shortVersionString>1.2.6</sparkle:shortVersionString>
+            <title>1.2.7</title>
+            <pubDate>Tue, 15 Sep 2026 03:54:35 +0000</pubDate>
+            <sparkle:version>20260915</sparkle:version>
+            <sparkle:shortVersionString>1.2.7</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/Aaron0927/JYBToolApp/releases/download/v1.2.6/JYBToolApp-v1.2.6.dmg" length="2564568" type="application/octet-stream" sparkle:edSignature="8FqkhJO6KeOscLLTwK7TncyMQDwgm8O6RWNIKb9wmEmI2y6Jc8RQHap4HQP+b+b3g/9OI3DGZI2M4EsMweRdBQ=="/>
+            <enclosure url="https://github.com/Aaron0927/JYBToolApp/releases/download/v1.2.7/JYBToolApp-v1.2.7.dmg" length="2569197" type="application/octet-stream" sparkle:edSignature="Ub6x0uz55iuasPJB0CbyF3X1neFg0WahANzV6Ss4u26wSA1RNoLzInpPTV6y61GOW3X/QYz5ar1NgLqRDQmGCg=="/>
         </item>
     </channel>
 </rss>
