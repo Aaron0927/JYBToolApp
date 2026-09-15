@@ -211,7 +211,7 @@ private struct RepoSwitchRow: View {
         BranchBadge(title: "当前", value: repo.currentBranch, style: .secondary)
         Image(systemName: "arrow.right")
           .foregroundStyle(.secondary)
-        BranchBadge(title: "目标", value: repo.targetBranch, style: .blue)
+        BranchBadge(title: targetTitle, value: targetValue, style: .blue)
         Spacer()
       }
 
@@ -244,6 +244,14 @@ private struct RepoSwitchRow: View {
       return repo.isCloned ? .purple : .red
     }
     return repo.isCloned ? .green : .orange
+  }
+
+  private var targetTitle: String {
+    repo.targetTag == nil ? "目标分支" : "目标Tag"
+  }
+
+  private var targetValue: String {
+    repo.targetTag ?? repo.targetBranch
   }
 }
 

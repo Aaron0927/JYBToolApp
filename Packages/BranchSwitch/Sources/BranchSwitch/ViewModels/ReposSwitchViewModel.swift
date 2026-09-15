@@ -318,7 +318,11 @@ public final class ReposSwitchViewModel {
     LogManager.shared.success("已读取 \(repos.count) 个仓库")
     LogManager.shared.info("仓库根目录: \(rootPath)")
     for repo in repos {
-      LogManager.shared.info("\(repo.name)\t当前分支: \(repo.currentBranch) -> 目标分支: \(repo.targetBranch)")
+      if let targetTag = repo.targetTag {
+        LogManager.shared.info("\(repo.name)\t当前分支: \(repo.currentBranch) -> 目标Tag: \(targetTag)")
+      } else {
+        LogManager.shared.info("\(repo.name)\t当前分支: \(repo.currentBranch) -> 目标分支: \(repo.targetBranch)")
+      }
     }
   }
 

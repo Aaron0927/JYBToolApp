@@ -95,6 +95,32 @@ final class ReposYAMLServiceTests: XCTestCase {
     XCTAssertEqual(config.repos[1].branch, "public_release")
   }
 
+  func testParseReposConfigReadsOptionalTag() throws {
+    let service = ReposYAMLService()
+    let content = """
+    root: "../.."
+
+    repos:
+      - name: TradeBook_Public
+        url: http://gitlab.iqdii.com/repo.git
+        path: TradeBook_Module/TradeBook_Public
+        branch: 8.4.20
+        tag: v8.4.20
+
+      - name: Trade_Comm
+        url: http://gitlab.iqdii.com/trade_comm.git
+        path: TradeRepo/Trade_Comm
+        branch: public_release
+    """
+
+    let config = try service.parseConfig(from: content)
+
+    XCTAssertEqual(config.repos[0].branch, "8.4.20")
+    XCTAssertEqual(config.repos[0].tag, "v8.4.20")
+    XCTAssertEqual(config.repos[1].branch, "public_release")
+    XCTAssertNil(config.repos[1].tag)
+  }
+
   func testParseConfigWithInlineCommentsAndQuotedValues() throws {
     let service = ReposYAMLService()
     let content = """
@@ -153,6 +179,38 @@ final class ReposYAMLServiceTests: XCTestCase {
       }
       XCTAssertEqual(field, "branch")
     }
+  }
+
+  func testUpdateRepoPrefersTagOverBranch() throws {
+    let remote = temporaryDirectory.appending(path: "dependency.git", directoryHint: .isDirectory)
+    let seed = temporaryDirectory.appending(path: "dependency-seed", directoryHint: .isDirectory)
+    let root = temporaryDirectory.appending(path: "root", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+    try runGit("init --bare \(shellEscaped(remote.path))", at: temporaryDirectory)
+    try makeSeedRepository(at: seed, remote: remote, fileName: "dependency.txt", content: "tag content")
+    try runGit("tag v1.0.0", at: seed)
+    try runGit("push origin v1.0.0", at: seed)
+    try commitAndPushChange(in: seed, fileName: "dependency.txt", content: "branch content")
+
+    let repo = DeclaredRepo(
+      name: "Dependency",
+      url: remote.path,
+      path: "Dependency",
+      branch: "master",
+      tag: "v1.0.0"
+    )
+
+    let result = ReposYAMLService().updateRepo(repo, rootURL: root) { _ in }
+
+    XCTAssertTrue(result.success, result.error ?? "未知错误")
+    let dependency = root.appending(path: "Dependency", directoryHint: .isDirectory)
+    XCTAssertEqual(
+      try String(contentsOf: dependency.appending(path: "dependency.txt"), encoding: .utf8),
+      "tag content"
+    )
+    XCTAssertEqual(try runGitOutput("branch --show-current", at: dependency), "")
+    XCTAssertEqual(try runGitOutput("describe --tags --exact-match", at: dependency), "v1.0.0")
   }
 
   private func makePullFixture() throws -> PullFixture {
@@ -225,6 +283,11 @@ final class ReposYAMLServiceTests: XCTestCase {
 
   private func runGit(_ arguments: String, at path: URL) throws {
     _ = try ProcessRunner().run("git \(arguments)", at: path.path)
+  }
+
+  private func runGitOutput(_ arguments: String, at path: URL) throws -> String {
+    try ProcessRunner().run("git \(arguments)", at: path.path)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   private func shellEscaped(_ value: String) -> String {

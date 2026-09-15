@@ -11,6 +11,7 @@ public enum ReposYAMLServiceError: Error, LocalizedError, Sendable {
   case missingField(line: Int, field: String)
   case emptyRepos
   case notGitRepository(String)
+  case tagNotFound(repo: String, tag: String)
 
   public var errorDescription: String? {
     switch self {
@@ -24,6 +25,8 @@ public enum ReposYAMLServiceError: Error, LocalizedError, Sendable {
       return "repos.yml 未声明任何仓库"
     case .notGitRepository(let path):
       return "路径已存在但不是 Git 仓库: \(path)"
+    case .tagNotFound(let repo, let tag):
+      return "\(repo) 未找到 tag: \(tag)"
     }
   }
 }
@@ -114,7 +117,8 @@ public final class ReposYAMLService: Sendable {
         throw ReposYAMLServiceError.missingField(line: currentRepoLine, field: "branch")
       }
 
-      repos.append(DeclaredRepo(name: name, url: url, path: path, branch: branch))
+      let tag = normalizedOptionalValue(currentRepo["tag"])
+      repos.append(DeclaredRepo(name: name, url: url, path: path, branch: branch, tag: tag))
       currentRepo = [:]
     }
 
@@ -197,6 +201,7 @@ public final class ReposYAMLService: Sendable {
         absolutePath: repoURL.path,
         currentBranch: isCloned ? (getCurrentBranch(at: repoURL.path) ?? "unknown") : "未克隆",
         targetBranch: repo.branch,
+        targetTag: repo.tag,
         isCloned: isCloned
       )
     }
@@ -297,7 +302,13 @@ public final class ReposYAMLService: Sendable {
         throw ReposYAMLServiceError.notGitRepository(repoURL.path)
       }
 
-      try updateGitRepository(name: repo.name, path: repoURL.path, branch: repo.branch, logger: logger)
+      try updateGitRepository(
+        name: repo.name,
+        path: repoURL.path,
+        branch: repo.branch,
+        tag: repo.tag,
+        logger: logger
+      )
       logger("\(repo.name) 完成")
       return RepoSwitchResult(name: repo.name, success: true)
     } catch {
@@ -317,7 +328,7 @@ public final class ReposYAMLService: Sendable {
         throw ReposYAMLServiceError.notGitRepository(path)
       }
 
-      try updateGitRepository(name: name, path: path, branch: branch, logger: logger)
+      try updateGitRepository(name: name, path: path, branch: branch, tag: nil, logger: logger)
       logger("\(name) 完成")
       return RepoSwitchResult(name: name, success: true)
     } catch {
@@ -519,6 +530,7 @@ public final class ReposYAMLService: Sendable {
     name: String,
     path: String,
     branch: String,
+    tag: String?,
     logger: @escaping @Sendable (String) -> Void
   ) throws {
     let hadChanges = hasTrackedChanges(at: path)
@@ -528,8 +540,12 @@ public final class ReposYAMLService: Sendable {
     }
 
     do {
-      try checkout(branch, at: path, logger: logger)
-      try pull(branch, at: path, logger: logger)
+      if let tag = normalizedOptionalValue(tag) {
+        try checkoutTag(tag, repoName: name, at: path, logger: logger)
+      } else {
+        try checkout(branch, at: path, logger: logger)
+        try pull(branch, at: path, logger: logger)
+      }
     } catch {
       if hadChanges {
         logger("\(name) 切换失败，尝试恢复暂存")
@@ -600,6 +616,28 @@ public final class ReposYAMLService: Sendable {
     _ = try processRunner.run("git pull origin \(escapedBranch)", at: path, timeout: 180)
   }
 
+  private func checkoutTag(
+    _ tag: String,
+    repoName: String,
+    at path: String,
+    logger: @escaping @Sendable (String) -> Void
+  ) throws {
+    logger("拉取 tags: \(tag)")
+    _ = try processRunner.run("git fetch --tags", at: path, timeout: 180)
+
+    guard try tagExists(tag, at: path) else {
+      throw ReposYAMLServiceError.tagNotFound(repo: repoName, tag: tag)
+    }
+
+    logger("按 tag 切换: \(tag)")
+    _ = try processRunner.run("git checkout --detach \(shellEscaped("refs/tags/\(tag)"))", at: path)
+  }
+
+  private func tagExists(_ tag: String, at path: String) throws -> Bool {
+    let output = try processRunner.run("git rev-parse --verify \(shellEscaped("refs/tags/\(tag)^{}"))", at: path)
+    return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
   private func parseKeyValue(from line: String, line lineNumber: Int) throws -> (key: String, value: String)? {
     guard line.contains(":") else { return nil }
     return try parseRequiredKeyValue(from: line, line: lineNumber)
@@ -649,6 +687,11 @@ public final class ReposYAMLService: Sendable {
     }
 
     return String(trimmed.dropFirst().dropLast())
+  }
+
+  private func normalizedOptionalValue(_ value: String?) -> String? {
+    let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return normalized.isEmpty ? nil : normalized
   }
 
   private func shellEscaped(_ value: String) -> String {
