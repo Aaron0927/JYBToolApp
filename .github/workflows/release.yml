@@ -49,19 +49,19 @@ jobs:
             "sparkle/JYBToolApp-${{ github.ref_name }}.dmg" \
             "build/JYBToolApp.app"
 
-      - name: Write Sparkle Ed25519 key
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.APPED25519 }}
-        run: |
-          printf "%s" "$SPARKLE_PRIVATE_KEY" | tr -d '\r' > sparkle/ed25519_private_key
-
       - name: Download Sparkle tools
         run: |
           curl -L https://github.com/sparkle-project/Sparkle/releases/download/2.9.0/Sparkle-for-Swift-Package-Manager.zip -o sparkle/Sparkle.zip
           unzip -o sparkle/Sparkle.zip -d sparkle
 
       - name: Generate Appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.APPED25519 }}
         run: |
+          if [ -z "${SPARKLE_PRIVATE_KEY:-}" ]; then
+            echo "::error::Sparkle signing key is unavailable"
+            exit 1
+          fi
           generate_appcast_path="$(find sparkle -type f -name generate_appcast -print -quit)"
           if [ -z "$generate_appcast_path" ]; then
             echo "generate_appcast not found under sparkle directory"
@@ -69,10 +69,16 @@ jobs:
             exit 1
           fi
           chmod +x "$generate_appcast_path"
-          "$generate_appcast_path" \
-            --ed-key-file sparkle/ed25519_private_key \
+          printf "%s" "$SPARKLE_PRIVATE_KEY" | tr -d '\r' | "$generate_appcast_path" \
+            --ed-key-file - \
             --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" \
             sparkle
+
+      - name: Prepare public download files
+        run: |
+          mkdir -p publish
+          cp "sparkle/JYBToolApp-${{ github.ref_name }}.dmg" publish/
+          cp sparkle/appcast.xml publish/
 
       - name: Commit appcast.xml
         run: |
@@ -93,9 +99,7 @@ jobs:
       - name: Deploy DMG to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: sparkle
+          folder: publish
           branch: gh-pages
-          clean-exclude: |
-            appcast.xml
-            SHA256SUMS*
+          clean: true
           commit-message: "deploy: release ${{ github.ref_name }}"

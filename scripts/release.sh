@@ -59,28 +59,25 @@ echo " Build: $BUILD"
 echo " Tag:   $TAG"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# ── 检查工作区是否干净（version bump 以外） ───────────────────────────────────
-UNSTAGED=$(git status --porcelain | grep -v "$PROJECT" || true)
-if [ -n "$UNSTAGED" ]; then
-    echo ""
-    echo "警告: 存在未提交的改动:"
-    echo "$UNSTAGED"
-    echo ""
-    if [ "$ASSUME_YES" = true ]; then
-        echo "已指定 --yes，继续发版"
-    else
-        read -r -p "继续发版? (y/N) " confirm
-        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-            echo "已取消"
-            exit 0
-        fi
-    fi
+# ── 仅从干净且与远程同步的 main 发版 ───────────────────────────────────────────
+if [ "$(git branch --show-current)" != "main" ]; then
+    echo "错误: 请在 main 分支发版"
+    exit 1
+fi
+if [ -n "$(git status --porcelain)" ]; then
+    echo "错误: 工作区存在未提交的改动"
+    exit 1
+fi
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null ||
+    git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+    echo "错误: Tag $TAG 已存在"
+    exit 1
 fi
 
 # ── 1. 同步远程（确保基于最新 main 发版） ─────────────────────────────────────
 echo ""
 echo "▸ [1/5] 同步远程..."
-git pull --rebase --autostash origin main
+git pull --ff-only origin main
 
 # ── 2. 更新 Xcode 版本号 ──────────────────────────────────────────────────────
 echo ""
@@ -111,11 +108,6 @@ git push origin main
 # ── 5. 打 Tag 并推送（触发 GitHub Actions） ───────────────────────────────────
 echo ""
 echo "▸ [5/5] 创建并推送 Tag $TAG..."
-if git rev-parse "$TAG" >/dev/null 2>&1; then
-    echo "  Tag $TAG 已存在，删除后重建"
-    git tag -d "$TAG"
-    git push origin ":refs/tags/$TAG"
-fi
 git tag "$TAG"
 git push origin "$TAG"
 
