@@ -4,6 +4,7 @@
 //
 
 import XCTest
+import JYBLog
 @testable import BranchSwitch
 
 final class ReposYAMLServiceTests: XCTestCase {
@@ -395,7 +396,7 @@ final class ReposYAMLServiceTests: XCTestCase {
   }
 
   @MainActor
-  func testTagBatchContinuesAfterOneRepositoryPushFails() async throws {
+  func testTagBatchPushesInBackgroundAndKeepsPushResultsInLogs() async throws {
     let remote = temporaryDirectory.appending(path: "tag-batch-remote.git", directoryHint: .isDirectory)
     let successfulRepository = temporaryDirectory.appending(path: "tag-batch-success", directoryHint: .isDirectory)
     let repositoryWithoutOrigin = temporaryDirectory.appending(path: "tag-batch-no-origin", directoryHint: .isDirectory)
@@ -406,6 +407,9 @@ final class ReposYAMLServiceTests: XCTestCase {
       fileName: "release.txt",
       content: "release content"
     )
+    let pushHook = remote.appending(path: "hooks/pre-receive")
+    try "#!/bin/sh\nsleep 2\n".write(to: pushHook, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: pushHook.path)
     try FileManager.default.createDirectory(at: repositoryWithoutOrigin, withIntermediateDirectories: true)
     try runGit("init", at: repositoryWithoutOrigin)
     try configureGitUser(at: repositoryWithoutOrigin)
@@ -438,8 +442,9 @@ final class ReposYAMLServiceTests: XCTestCase {
     let viewModel = TagManagementViewModel()
     viewModel.repositories = [workspace, dependency]
     viewModel.selectedRepositoryIDs = [workspace.id, dependency.id]
+    let tagName = "v1.0.0-background"
     viewModel.createAndPushTag(
-      name: "v1.0.0",
+      name: tagName,
       message: "Batch release",
       repositoryIDs: viewModel.selectedRepositoryIDs
     )
@@ -450,9 +455,30 @@ final class ReposYAMLServiceTests: XCTestCase {
     }
 
     XCTAssertFalse(viewModel.isBusy, "Tag 批处理应在 20 秒内结束")
-    XCTAssertEqual(viewModel.operationResults.map(\.status), [.success, .pushFailed])
+    XCTAssertEqual(viewModel.operationResults.map(\.status), [.success, .success])
     XCTAssertEqual(viewModel.operationResults.map(\.repositoryName), ["Workspace", "Dependency"])
-    XCTAssertTrue(try ReposYAMLService().loadTags(at: repositoryWithoutOrigin.path).tags.contains { $0.name == "v1.0.0" })
+    XCTAssertTrue(viewModel.statusMessage?.contains("已开始后台推送") == true)
+    XCTAssertFalse(LogManager.shared.entries.contains {
+      $0.message.contains("Tag \(tagName)") && $0.message.contains("已推送到 origin")
+    }, "本地创建完成时不应等待远程推送")
+
+    let pushDeadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while ContinuousClock.now < pushDeadline {
+      let logs = LogManager.shared.entries.filter { $0.message.contains("Tag \(tagName)") }
+      let didPush = logs.contains { $0.level == .success && $0.message.contains("Workspace") && $0.message.contains("已推送到 origin") }
+      let didFail = logs.contains { $0.level == .error && $0.message.contains("Dependency") && $0.message.contains("后台推送失败") }
+      if didPush && didFail { break }
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    let pushLogs = LogManager.shared.entries.filter { $0.message.contains("Tag \(tagName)") }
+    XCTAssertTrue(pushLogs.contains { $0.level == .success && $0.message.contains("Workspace") && $0.message.contains("已推送到 origin") })
+    XCTAssertTrue(pushLogs.contains { $0.level == .error && $0.message.contains("Dependency") && $0.message.contains("后台推送失败") })
+    XCTAssertEqual(viewModel.operationResults.map(\.status), [.success, .success], "推送结果不应改写页面上的本地创建结果")
+    let pushedTag = try XCTUnwrap(ReposYAMLService().loadTags(at: successfulRepository.path).tags.first { $0.name == tagName })
+    XCTAssertNotNil(pushedTag.remoteObjectID)
+    let localTag = try XCTUnwrap(ReposYAMLService().loadTags(at: repositoryWithoutOrigin.path).tags.first { $0.name == tagName })
+    XCTAssertNil(localTag.remoteObjectID)
   }
 
   @MainActor
@@ -495,7 +521,7 @@ final class ReposYAMLServiceTests: XCTestCase {
 
     XCTAssertFalse(viewModel.isBusy, "本地 Tag 创建应在 20 秒内结束")
     XCTAssertEqual(viewModel.operationResults.map(\.status), [.success])
-    XCTAssertTrue(viewModel.operationResults.first?.message.contains("未推送到远程") == true)
+    XCTAssertTrue(viewModel.operationResults.first?.message.contains("创建本地 Tag") == true)
     let tag = try XCTUnwrap(ReposYAMLService().loadTags(at: repository.path).tags.first)
     XCTAssertEqual(tag.name, "v1.0.0-local")
     XCTAssertNotNil(tag.localObjectID)

@@ -3,8 +3,6 @@ import ToolUI
 
 struct TagOperationResultRow: View {
   let result: TagRepositoryOperationResult
-  let isDisabled: Bool
-  let onRetry: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -13,11 +11,6 @@ struct TagOperationResultRow: View {
           .bold()
         Spacer()
         ToolStatusBadge(statusTitle, kind: statusKind)
-        if result.status == .pushFailed {
-          Button("重试推送", systemImage: "arrow.up", action: onRetry)
-            .buttonStyle(.borderless)
-            .disabled(isDisabled)
-        }
       }
       Text(result.message)
         .font(.caption)

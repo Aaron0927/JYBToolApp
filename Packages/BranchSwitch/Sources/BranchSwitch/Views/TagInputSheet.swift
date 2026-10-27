@@ -41,7 +41,7 @@ struct TagInputSheet: View {
 
       HStack {
         Text(pushToRemote
-          ? "Tag 会基于每个仓库当前 HEAD 创建，并推送到 origin。"
+          ? "Tag 会基于每个仓库当前 HEAD 创建，再在后台推送到 origin；结果见执行日志。"
           : "Tag 只会在每个仓库本地创建，不会推送到远程。")
           .font(.caption)
           .foregroundStyle(.secondary)

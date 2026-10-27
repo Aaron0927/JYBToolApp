@@ -13,7 +13,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "BranchSwitch", dependencies: ["JYBLog", "ToolUI"]),
-        .testTarget(name: "BranchSwitchTests", dependencies: ["BranchSwitch"])
+        .testTarget(name: "BranchSwitchTests", dependencies: ["BranchSwitch", "JYBLog"])
     ],
     swiftLanguageModes: [.v6]
 )
