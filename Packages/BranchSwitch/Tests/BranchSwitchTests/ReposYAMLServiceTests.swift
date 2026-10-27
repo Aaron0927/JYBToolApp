@@ -240,6 +240,48 @@ final class ReposYAMLServiceTests: XCTestCase {
     XCTAssertEqual(try runGitOutput("describe --tags --exact-match", at: dependency), "v1.0.0")
   }
 
+  func testTagManagementCreatesPushesAndDeletesTags() throws {
+    let remote = temporaryDirectory.appending(path: "tag-remote.git", directoryHint: .isDirectory)
+    let repository = temporaryDirectory.appending(path: "tag-repository", directoryHint: .isDirectory)
+    try runGit("init --bare \(shellEscaped(remote.path))", at: temporaryDirectory)
+    try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+    try runGit("init", at: repository)
+    try configureGitUser(at: repository)
+    try "release content".write(to: repository.appending(path: "release.txt"), atomically: true, encoding: .utf8)
+    try runGit("add release.txt", at: repository)
+    try runGit("commit -m 'Release commit'", at: repository)
+    try runGit("remote add origin \(shellEscaped(remote.path))", at: repository)
+    try runGit("push -u origin HEAD", at: repository)
+
+    let service = ReposYAMLService()
+    try service.createTag("releases/v1.0.0", message: "First release", at: repository.path)
+
+    let localTag = try XCTUnwrap(service.loadTags(at: repository.path).tags.first)
+    XCTAssertEqual(localTag.name, "releases/v1.0.0")
+    XCTAssertNotNil(localTag.localObjectID)
+    XCTAssertNil(localTag.remoteObjectID)
+
+    try service.pushTag(localTag.name, at: repository.path)
+    let pushedTag = try XCTUnwrap(service.loadTags(at: repository.path).tags.first)
+    XCTAssertNotNil(pushedTag.remoteObjectID)
+
+    try service.deleteLocalTag(pushedTag.name, at: repository.path)
+    let remoteOnlyTag = try XCTUnwrap(service.loadTags(at: repository.path).tags.first)
+    XCTAssertNil(remoteOnlyTag.localObjectID)
+    XCTAssertNotNil(remoteOnlyTag.remoteObjectID)
+
+    try service.deleteRemoteTag(remoteOnlyTag.name, at: repository.path)
+    XCTAssertTrue(try service.loadTags(at: repository.path).tags.isEmpty)
+  }
+
+  func testTagManagementRejectsInvalidTagName() throws {
+    let repository = temporaryDirectory.appending(path: "invalid-tag-repository", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+    try runGit("init", at: repository)
+
+    XCTAssertThrowsError(try ReposYAMLService().createTag("bad..tag", message: "Invalid", at: repository.path))
+  }
+
   private func makePullFixture() throws -> PullFixture {
     let workspaceRemote = temporaryDirectory.appending(path: "workspace.git", directoryHint: .isDirectory)
     let dependencyRemote = temporaryDirectory.appending(path: "dependency.git", directoryHint: .isDirectory)

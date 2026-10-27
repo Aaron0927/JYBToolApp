@@ -11,13 +11,15 @@ import SwiftUI
 @Observable
 @MainActor
 final class ContentViewModel {
-    var selectedToolId: String? = Tool.branchTool.id
+    var selectedToolId: String? = Tool.reposBranchTool.id
     
     let tools: [Tool] = [
+        .reposBranchTool,
+        .reposPullTool,
+        .reposTagTool,
+        .branchTool,
         .switchTool,
         .copyTool,
-        .branchTool,
-        .reposBranchTool,
     ]
     
     var groupedTools: [String: [Tool]] {

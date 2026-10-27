@@ -70,3 +70,27 @@ public struct RepoSwitchInfo: Identifiable, Equatable, Sendable {
 
   public var id: String { "\(scope.rawValue):\(path)" }
 }
+
+public struct GitTagInfo: Identifiable, Equatable, Sendable {
+  public let name: String
+  public let localObjectID: String?
+  public let remoteObjectID: String?
+
+  public init(name: String, localObjectID: String?, remoteObjectID: String?) {
+    self.name = name
+    self.localObjectID = localObjectID
+    self.remoteObjectID = remoteObjectID
+  }
+
+  public var id: String { name }
+}
+
+public struct GitTagSnapshot: Sendable {
+  public let tags: [GitTagInfo]
+  public let hasOrigin: Bool
+
+  public init(tags: [GitTagInfo], hasOrigin: Bool) {
+    self.tags = tags
+    self.hasOrigin = hasOrigin
+  }
+}

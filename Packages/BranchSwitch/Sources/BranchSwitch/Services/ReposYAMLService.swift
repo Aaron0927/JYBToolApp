@@ -209,6 +209,88 @@ public final class ReposYAMLService: Sendable {
     return (config, rootURL.path, infos)
   }
 
+  public func loadTags(at path: String) throws -> GitTagSnapshot {
+    guard isGitRepository(at: path) else {
+      throw ReposYAMLServiceError.notGitRepository(path)
+    }
+
+    var tagsByName: [String: (local: String?, remote: String?)] = [:]
+    let localOutput = try processRunner.run(
+      "git for-each-ref --format='%(refname:strip=2)%09%(objectname:short)' refs/tags",
+      at: path
+    )
+    for line in localOutput.split(separator: "\n") {
+      let fields = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+      guard fields.count == 2, !fields[0].isEmpty else { continue }
+      tagsByName[fields[0], default: (nil, nil)].local = fields[1]
+    }
+
+    let remotes = try processRunner.run("git remote", at: path)
+      .split(whereSeparator: \.isNewline)
+      .map(String.init)
+    let hasOrigin = remotes.contains("origin")
+    if hasOrigin {
+      let remoteOutput = try processRunner.run("git ls-remote --tags --refs origin", at: path, timeout: 60)
+      for line in remoteOutput.split(separator: "\n") {
+        let fields = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        let tagPrefix = "refs/tags/"
+        guard fields.count == 2, fields[1].hasPrefix(tagPrefix) else { continue }
+        let name = String(fields[1].dropFirst(tagPrefix.count))
+        guard !name.isEmpty else { continue }
+        tagsByName[name, default: (nil, nil)].remote = fields[0]
+      }
+    }
+
+    let tags = tagsByName.map { name, refs in
+      GitTagInfo(name: name, localObjectID: refs.local, remoteObjectID: refs.remote)
+    }
+    .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+
+    return GitTagSnapshot(tags: tags, hasOrigin: hasOrigin)
+  }
+
+  public func createTag(_ name: String, message: String, at path: String) throws {
+    try validateTagName(name, at: path)
+    guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      throw ProcessRunnerError.executionFailed("Tag 说明不能为空")
+    }
+
+    _ = try processRunner.run(
+      "git tag -a \(shellEscaped(name)) -m \(shellEscaped(message))",
+      at: path
+    )
+  }
+
+  public func pushTag(_ name: String, at path: String) throws {
+    try validateTagName(name, at: path)
+    _ = try processRunner.run("git push origin refs/tags/\(shellEscaped(name))", at: path, timeout: 180)
+  }
+
+  public func deleteLocalTag(_ name: String, at path: String) throws {
+    try validateTagName(name, at: path)
+    _ = try processRunner.run("git tag --delete \(shellEscaped(name))", at: path)
+  }
+
+  public func deleteRemoteTag(_ name: String, at path: String) throws {
+    try validateTagName(name, at: path)
+    _ = try processRunner.run("git push origin --delete \(shellEscaped(name))", at: path, timeout: 180)
+  }
+
+  private func validateTagName(_ name: String, at path: String) throws {
+    guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      throw ProcessRunnerError.executionFailed("Tag 名称不能为空")
+    }
+
+    let reference = "refs/tags/\(name)"
+    let result = try processRunner.run(
+      "git check-ref-format \(shellEscaped(reference)) && printf valid || printf invalid",
+      at: path
+    )
+    guard result.trimmingCharacters(in: .whitespacesAndNewlines) == "valid" else {
+      throw ProcessRunnerError.executionFailed("Tag 名称格式无效：\(name)")
+    }
+  }
+
   public func pullAllRepositories(
     atProjectPath projectPath: String,
     logger: @escaping @Sendable (String) -> Void

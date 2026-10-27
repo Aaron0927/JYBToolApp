@@ -4,7 +4,6 @@ import ToolUI
 public struct ReposSwitchView: View {
   @Bindable var viewModel: ReposSwitchViewModel
   @State private var isConfirmingSwitch = false
-  @State private var isConfirmingPull = false
 
   public init(viewModel: ReposSwitchViewModel) {
     self.viewModel = viewModel
@@ -13,8 +12,8 @@ public struct ReposSwitchView: View {
   public var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       ToolPageHeader(
-        title: "公版依赖仓库",
-        subtitle: "读取主工程的 repos.yml，按仓库配置切换分支或 Tag，也可以批量拉取最新代码。",
+        title: "依赖仓库切换",
+        subtitle: "读取主工程的 repos.yml，预览依赖仓库目标分支或 Tag 后批量切换。",
         systemImage: "shippingbox"
       )
 
@@ -78,8 +77,10 @@ public struct ReposSwitchView: View {
           if !viewModel.rootPath.isEmpty {
             ToolValueRow("仓库根目录", value: viewModel.rootPath)
           }
-          if let pullSummary = viewModel.pullSummary {
-            ToolValueRow("最近拉取", value: pullSummary)
+          if let loadErrorMessage = viewModel.loadErrorMessage {
+            Label(loadErrorMessage, systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.red)
+              .textSelection(.enabled)
           }
           if let operationSummary = viewModel.operationSummary {
             ToolValueRow("最近操作", value: operationSummary)
@@ -101,11 +102,6 @@ public struct ReposSwitchView: View {
               .font(.subheadline)
               .foregroundStyle(.secondary)
             Spacer()
-            Button("拉取全部最新代码", systemImage: "arrow.down.to.line.compact") {
-              isConfirmingPull = true
-            }
-            .disabled(viewModel.isBusy || viewModel.projectPath.isEmpty)
-
             Button("确认切换", systemImage: "arrow.triangle.branch") {
               isConfirmingSwitch = true
             }
@@ -145,18 +141,6 @@ public struct ReposSwitchView: View {
       Button("取消", role: .cancel) {}
     } message: {
       Text("将按 repos.yml 对主工作区及依赖仓库切换分支或 Tag。存在本地修改的仓库可能无法切换。")
-    }
-    .confirmationDialog(
-      "拉取全部公版仓库？",
-      isPresented: $isConfirmingPull,
-      titleVisibility: .visible
-    ) {
-      Button("开始拉取") {
-        viewModel.pullAllRepositories()
-      }
-      Button("取消", role: .cancel) {}
-    } message: {
-      Text("将读取 repos.yml 并逐仓拉取。遇到本地修改时按工具的自动暂存与恢复策略处理。")
     }
   }
 

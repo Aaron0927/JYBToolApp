@@ -13,9 +13,18 @@ public struct BranchSwitchView: View {
     VStack(alignment: .leading, spacing: 16) {
       ToolPageHeader(
         title: "主仓库子模块切换",
-        subtitle: "选择主仓库分支，查看子模块目标后再执行同步。",
+        subtitle: "已过时工具。选择主仓库分支后，可查看并同步子模块目标。",
         systemImage: "arrow.triangle.branch"
       )
+
+      ToolPanel("已过时", systemImage: "exclamationmark.triangle") {
+        HStack(alignment: .top, spacing: 10) {
+          ToolStatusBadge("已过时", kind: .warning)
+          Text("该入口暂时保留供既有流程使用，不建议用于新流程。")
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
 
       ToolPanel("主仓库", systemImage: "folder") {
         HStack {

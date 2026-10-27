@@ -24,6 +24,8 @@ public final class ReposSwitchViewModel {
   public var isSwitching = false
   public var isPulling = false
   public var isConfirmEnabled = false
+  public var isPullPreviewLoaded = false
+  public var loadErrorMessage: String?
   public var pullSummary: String?
   public var operationSummary: String?
   public var operationResults: [String: String] = [:]
@@ -112,6 +114,8 @@ public final class ReposSwitchViewModel {
     currentTask?.cancel()
     isLoading = true
     isConfirmEnabled = false
+    isPullPreviewLoaded = false
+    loadErrorMessage = nil
     configPath = service.configURL(forProjectPath: projectPath).path
     LogManager.shared.info("正在切换主工程到 \(selectedBranch)，并读取 repos.yml...")
 
@@ -147,6 +151,42 @@ public final class ReposSwitchViewModel {
       }.value
 
       finishLoad(result)
+    }
+  }
+
+  public func loadPullPreview() {
+    guard !projectPath.isEmpty else { return }
+    currentTask?.cancel()
+    isLoading = true
+    isConfirmEnabled = false
+    isPullPreviewLoaded = false
+    loadErrorMessage = nil
+    configPath = service.configURL(forProjectPath: projectPath).path
+
+    let currentProjectPath = projectPath
+    currentTask = Task { @MainActor in
+      let result = await Task.detached { () -> LoadResult in
+        do {
+          let service = ReposYAMLService()
+          let loaded = try service.loadRepoInfos(atProjectPath: currentProjectPath)
+          let workspaceBranch = service.getCurrentBranch(at: loaded.rootPath) ?? ""
+          let workspaceInfo = service.makeWorkspaceRepoInfo(
+            rootPath: loaded.rootPath,
+            targetBranch: workspaceBranch
+          )
+          return LoadResult(
+            config: loaded.config,
+            rootPath: loaded.rootPath,
+            repos: [workspaceInfo] + loaded.infos,
+            currentBranch: workspaceBranch,
+            error: nil
+          )
+        } catch {
+          return LoadResult(config: nil, rootPath: "", repos: [], currentBranch: "", error: error.localizedDescription)
+        }
+      }.value
+
+      finishPullPreview(result)
     }
   }
 
@@ -234,7 +274,7 @@ public final class ReposSwitchViewModel {
   }
 
   public func pullAllRepositories() {
-    guard !projectPath.isEmpty else { return }
+    guard !projectPath.isEmpty, isPullPreviewLoaded else { return }
     currentTask?.cancel()
     isPulling = true
     pullSummary = nil
@@ -283,6 +323,7 @@ public final class ReposSwitchViewModel {
     currentTask = nil
 
     if let error = result.error {
+      loadErrorMessage = error
       localBranches = []
       currentBranch = ""
       selectedBranch = ""
@@ -308,6 +349,7 @@ public final class ReposSwitchViewModel {
     currentTask = nil
 
     if let error = result.error {
+      loadErrorMessage = error
       loadedConfig = nil
       repos = []
       rootPath = ""
@@ -317,10 +359,12 @@ public final class ReposSwitchViewModel {
     }
 
     loadedConfig = result.config
+    loadErrorMessage = nil
     rootPath = result.rootPath
     repos = result.repos
     currentBranch = result.currentBranch.isEmpty ? selectedBranch : result.currentBranch
     isConfirmEnabled = !repos.isEmpty
+    isPullPreviewLoaded = false
     saveLastProjectPath()
 
     LogManager.shared.success("主工程已切换到 \(selectedBranch)")
@@ -333,6 +377,34 @@ public final class ReposSwitchViewModel {
         LogManager.shared.info("\(repo.name)\t当前分支: \(repo.currentBranch) -> 目标分支: \(repo.targetBranch)")
       }
     }
+  }
+
+  private func finishPullPreview(_ result: LoadResult) {
+    isLoading = false
+    currentTask = nil
+
+    if let error = result.error {
+      loadedConfig = nil
+      repos = []
+      rootPath = ""
+      loadErrorMessage = error
+      isPullPreviewLoaded = false
+      LogManager.shared.error("读取拉取范围失败: \(error)")
+      return
+    }
+
+    loadedConfig = result.config
+    loadErrorMessage = nil
+    rootPath = result.rootPath
+    repos = result.repos
+    currentBranch = result.currentBranch
+    isPullPreviewLoaded = !repos.isEmpty
+    pullSummary = nil
+    operationSummary = nil
+    operationResults = [:]
+    operationDetails = [:]
+    LogManager.shared.success("已读取 \(repos.count) 个仓库的拉取范围")
+    LogManager.shared.info("仓库根目录: \(rootPath)")
   }
 
   private func finishSwitch(_ results: [RepoSwitchResult]) {
@@ -374,6 +446,7 @@ public final class ReposSwitchViewModel {
     if let error = result.error {
       pullSummary = "拉取失败：\(error)"
       operationSummary = pullSummary
+      loadErrorMessage = error
       LogManager.shared.error("========== 拉取失败：\(error) ==========")
       return
     }
@@ -408,6 +481,7 @@ public final class ReposSwitchViewModel {
     let failedCount = result.results.filter { $0.status == .failed }.count
     pullSummary = "最近拉取：成功 \(successCount)，跳过 \(skippedCount)，失败 \(failedCount)"
     operationSummary = pullSummary
+    loadErrorMessage = nil
     LogManager.shared.info("========== \(pullSummary ?? "拉取完成") ==========")
   }
 
@@ -420,6 +494,8 @@ public final class ReposSwitchViewModel {
     repos = []
     rootPath = ""
     isConfirmEnabled = false
+    isPullPreviewLoaded = false
+    loadErrorMessage = nil
     operationSummary = nil
     operationResults = [:]
     operationDetails = [:]
