@@ -372,6 +372,29 @@ final class ReposYAMLServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testTagManagementSelectsAllRepositoriesAfterLoad() async throws {
+    let fixture = try makePullFixture()
+    let viewModel = TagManagementViewModel()
+    viewModel.projectPath = fixture.project.path
+    viewModel.loadRepositories()
+
+    let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    XCTAssertFalse(viewModel.isBusy, "仓库读取应在 20 秒内结束")
+    XCTAssertNil(viewModel.errorMessage)
+    XCTAssertEqual(viewModel.repositories.count, 2)
+    XCTAssertTrue(viewModel.areAllRepositoriesSelected)
+    XCTAssertEqual(viewModel.selectedRepositories.count, 2)
+
+    viewModel.setRepository(viewModel.repositories[0].id, selected: false)
+    XCTAssertEqual(viewModel.selectedRepositories.count, 1)
+    XCTAssertFalse(viewModel.areAllRepositoriesSelected)
+  }
+
+  @MainActor
   func testTagBatchContinuesAfterOneRepositoryPushFails() async throws {
     let remote = temporaryDirectory.appending(path: "tag-batch-remote.git", directoryHint: .isDirectory)
     let successfulRepository = temporaryDirectory.appending(path: "tag-batch-success", directoryHint: .isDirectory)
@@ -433,7 +456,7 @@ final class ReposYAMLServiceTests: XCTestCase {
   }
 
   @MainActor
-  func testTagBatchCanCreateLocalTagWithoutPushing() async throws {
+  func testTagBatchCanCreateLocalTagWithoutAnnotationOrPushing() async throws {
     let remote = temporaryDirectory.appending(path: "tag-local-only-remote.git", directoryHint: .isDirectory)
     let repository = temporaryDirectory.appending(path: "tag-local-only-repository", directoryHint: .isDirectory)
     try runGit("init --bare \(shellEscaped(remote.path))", at: temporaryDirectory)
@@ -456,9 +479,11 @@ final class ReposYAMLServiceTests: XCTestCase {
     let viewModel = TagManagementViewModel()
     viewModel.repositories = [repoInfo]
     viewModel.selectedRepositoryIDs = [repoInfo.id]
+    viewModel.tagName = "v1.0.0-local"
+    XCTAssertTrue(viewModel.canCreateTag)
     viewModel.createAndPushTag(
       name: "v1.0.0-local",
-      message: "Local release",
+      message: "",
       repositoryIDs: [repoInfo.id],
       pushToRemote: false
     )

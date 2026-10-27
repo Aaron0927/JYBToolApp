@@ -12,8 +12,7 @@ struct TagInputSheet: View {
 
   private var canContinue: Bool {
     !isBusy &&
-      !tagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-      !tagMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      !tagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   var body: some View {
@@ -31,9 +30,9 @@ struct TagInputSheet: View {
         .accessibilityLabel("Tag 名称")
         .disabled(isBusy)
 
-      TextField("附注说明", text: $tagMessage, axis: .vertical)
+      TextField("附注说明（选填）", text: $tagMessage, axis: .vertical)
         .lineLimit(3...5)
-        .accessibilityLabel("Tag 附注说明")
+        .accessibilityLabel("Tag 附注说明，选填")
         .disabled(isBusy)
 
       Toggle("推送到远程", isOn: $pushToRemote)

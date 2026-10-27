@@ -253,10 +253,6 @@ public final class ReposYAMLService: Sendable {
 
   public func createTag(_ name: String, message: String, at path: String) throws {
     try validateTagName(name, at: path)
-    guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-      throw ProcessRunnerError.executionFailed("Tag 说明不能为空")
-    }
-
     _ = try processRunner.run(
       "git tag -a \(shellEscaped(name)) -m \(shellEscaped(message))",
       at: path

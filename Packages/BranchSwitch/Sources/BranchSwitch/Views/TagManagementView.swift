@@ -17,7 +17,7 @@ public struct TagManagementView: View {
       VStack(alignment: .leading, spacing: 16) {
         ToolPageHeader(
           title: "Tag 管理",
-          subtitle: "先读取仓库，再勾选目标；设置 Tag 时统一输入名称和附注。",
+          subtitle: "读取仓库后默认全选，可调整目标；设置 Tag 时输入名称，可选填附注说明。",
           systemImage: "tag"
         )
 
@@ -51,7 +51,7 @@ public struct TagManagementView: View {
               .font(.caption)
               .foregroundStyle(.secondary)
           } else {
-            Text("已读取 \(viewModel.repositories.count) 个仓库；请在下方列表选择操作目标。")
+            Text("已读取 \(viewModel.repositories.count) 个仓库，默认全选；可在下方列表调整操作目标。")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
@@ -249,9 +249,9 @@ private enum PendingTagAction {
   var message: String {
     switch self {
     case .createTag(let name, let message, true, _, let repositoryNames):
-      "将在 \(repositoryNames.count) 个仓库的当前 HEAD 创建 annotated Tag「\(name)」并推送到 origin。仓库：\(repositoryNames.joined(separator: "、"))。附注：\(message)"
+      "将在 \(repositoryNames.count) 个仓库的当前 HEAD 创建 annotated Tag「\(name)」并推送到 origin。仓库：\(repositoryNames.joined(separator: "、"))。附注说明：\(message.isEmpty ? "未填写" : message)"
     case .createTag(let name, let message, false, _, let repositoryNames):
-      "将在 \(repositoryNames.count) 个仓库的当前 HEAD 创建 annotated Tag「\(name)」，仅保留在本地，不推送到远程。仓库：\(repositoryNames.joined(separator: "、"))。附注：\(message)"
+      "将在 \(repositoryNames.count) 个仓库的当前 HEAD 创建 annotated Tag「\(name)」，仅保留在本地，不推送到远程。仓库：\(repositoryNames.joined(separator: "、"))。附注说明：\(message.isEmpty ? "未填写" : message)"
     case .retryPush(_, let repositoryName, let name):
       "将把仓库「\(repositoryName)」中本地已创建的 Tag「\(name)」推送到 origin。"
     }

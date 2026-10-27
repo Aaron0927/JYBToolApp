@@ -35,8 +35,7 @@ public final class TagManagementViewModel {
 
   public var canCreateTag: Bool {
     !selectedRepositories.isEmpty &&
-      !tagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-      !tagMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      !tagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   public init() {
@@ -89,6 +88,7 @@ public final class TagManagementViewModel {
       self.isLoading = false
       self.currentTask = nil
       self.repositories = result.repositories
+      self.selectedRepositoryIDs = Set(result.repositories.map(\.id))
       self.errorMessage = result.error
     }
   }
@@ -122,8 +122,8 @@ public final class TagManagementViewModel {
       errorMessage = "请至少选择一个仓库。"
       return
     }
-    guard !name.isEmpty, !message.isEmpty else {
-      errorMessage = "Tag 名称和附注说明不能为空。"
+    guard !name.isEmpty else {
+      errorMessage = "Tag 名称不能为空。"
       return
     }
 
