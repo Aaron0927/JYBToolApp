@@ -4,6 +4,7 @@ import ToolUI
 public struct TagManagementView: View {
   @Bindable private var viewModel: TagManagementViewModel
   @State private var pendingAction: PendingTagAction?
+  @State private var isShowingTagInput = false
   @State private var isShowingConfirmation = false
 
   public init(viewModel: TagManagementViewModel) {
@@ -15,74 +16,11 @@ public struct TagManagementView: View {
       VStack(alignment: .leading, spacing: 16) {
         ToolPageHeader(
           title: "Tag 管理",
-          subtitle: "选择多个仓库后，可使用同一 Tag 名称和附注进行统一处理。",
+          subtitle: "先读取仓库，再勾选目标；设置 Tag 时统一输入名称和附注。",
           systemImage: "tag"
         )
 
-        ToolPanel("Tag 操作区", systemImage: "tag") {
-          TextField("Tag 名称，例如 v8.4.21", text: $viewModel.tagName)
-            .font(.system(.body, design: .monospaced))
-            .accessibilityLabel("Tag 名称")
-            .disabled(viewModel.isBusy)
-
-          TextField("附注说明", text: $viewModel.tagMessage, axis: .vertical)
-            .lineLimit(2...4)
-            .accessibilityLabel("Tag 附注说明")
-            .disabled(viewModel.isBusy)
-
-          HStack {
-            Text("将在下方选择的 \(viewModel.selectedRepositoryIDs.count) 个仓库中创建并推送同一个 Tag。")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            Spacer()
-            Button("设置并推送", systemImage: "arrow.up") {
-              let repositories = viewModel.selectedRepositories
-              pendingAction = .createAndPush(
-                viewModel.tagName.trimmingCharacters(in: .whitespacesAndNewlines),
-                viewModel.tagMessage.trimmingCharacters(in: .whitespacesAndNewlines),
-                Set(repositories.map(\.id)),
-                repositories.map(\.name)
-              )
-              isShowingConfirmation = true
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(viewModel.isBusy || !viewModel.canCreateAndPushTag)
-            .keyboardShortcut(.defaultAction)
-          }
-
-          if viewModel.isWorking, let progress = viewModel.operationProgress {
-            ProgressView(progress)
-              .controlSize(.small)
-          }
-          if let error = viewModel.errorMessage {
-            Label(error, systemImage: "exclamationmark.triangle.fill")
-              .foregroundStyle(.red)
-              .textSelection(.enabled)
-          } else if let status = viewModel.statusMessage {
-            Label(status, systemImage: "checkmark.circle")
-              .foregroundStyle(.secondary)
-          }
-
-          if !viewModel.operationResults.isEmpty {
-            Divider()
-            Text("逐仓结果")
-              .font(.headline)
-            VStack(alignment: .leading, spacing: 8) {
-              ForEach(viewModel.operationResults) { result in
-                TagOperationResultRow(
-                  result: result,
-                  isDisabled: viewModel.isBusy,
-                  onRetry: {
-                    pendingAction = .retryPush(result.repositoryID, result.repositoryName, result.tagName)
-                    isShowingConfirmation = true
-                  }
-                )
-              }
-            }
-          }
-        }
-
-        ToolPanel("仓库选择", systemImage: "shippingbox") {
+        ToolPanel("仓库选择", systemImage: "folder") {
           HStack {
             TextField("选择包含 fastlane/repos.yml 的主工程目录", text: $viewModel.projectPath)
               .disabled(true)
@@ -103,15 +41,80 @@ public struct TagManagementView: View {
           if viewModel.isLoading {
             ProgressView("正在读取仓库列表…")
               .controlSize(.small)
+          } else if viewModel.repositories.isEmpty, let error = viewModel.errorMessage {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.red)
+              .textSelection(.enabled)
           } else if viewModel.repositories.isEmpty {
+            Text("选择主工程目录并读取仓库后，仓库列表会显示在页面下方。")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } else {
+            Text("已读取 \(viewModel.repositories.count) 个仓库；请在下方列表选择操作目标。")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+
+        ToolPanel("操作区域", systemImage: "tag") {
+          HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("设置 Tag")
+                .font(.headline)
+              Text(operationHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("设置 Tag", systemImage: "tag") {
+              pendingAction = nil
+              isShowingTagInput = true
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(viewModel.isBusy || viewModel.selectedRepositoryIDs.isEmpty)
+          }
+
+          if viewModel.isWorking, let progress = viewModel.operationProgress {
+            ProgressView(progress)
+              .controlSize(.small)
+          }
+          if let error = viewModel.errorMessage, !viewModel.repositories.isEmpty {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.red)
+              .textSelection(.enabled)
+          } else if let status = viewModel.statusMessage {
+            Label(status, systemImage: "checkmark.circle")
+              .foregroundStyle(.secondary)
+          }
+
+          if !viewModel.operationResults.isEmpty {
+            Divider()
+            Text("逐仓执行结果")
+              .font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+              ForEach(viewModel.operationResults) { result in
+                TagOperationResultRow(
+                  result: result,
+                  isDisabled: viewModel.isBusy,
+                  onRetry: {
+                    pendingAction = .retryPush(result.repositoryID, result.repositoryName, result.tagName)
+                    isShowingConfirmation = true
+                  }
+                )
+              }
+            }
+          }
+        }
+
+        ToolPanel("仓库列表", systemImage: "shippingbox") {
+          if viewModel.repositories.isEmpty {
             ContentUnavailableView(
               "尚未载入仓库",
               systemImage: "shippingbox",
-              description: Text("选择主工程目录并读取仓库后，可勾选一个或多个操作目标。")
+              description: Text("读取仓库后，可在这里多选主仓库和依赖仓库。")
             )
             .frame(maxWidth: .infinity, minHeight: 110)
           } else {
-            Divider()
             HStack {
               Text("已选择 \(viewModel.selectedRepositoryIDs.count) / \(viewModel.repositories.count) 个仓库")
                 .foregroundStyle(.secondary)
@@ -130,6 +133,32 @@ public struct TagManagementView: View {
       .padding()
       .frame(maxWidth: 980, alignment: .leading)
       .frame(maxWidth: .infinity, alignment: .top)
+    }
+    .sheet(isPresented: $isShowingTagInput, onDismiss: {
+      if pendingAction?.requiresPostInputConfirmation == true {
+        isShowingConfirmation = true
+      }
+    }) {
+      TagInputSheet(
+        tagName: $viewModel.tagName,
+        tagMessage: $viewModel.tagMessage,
+        selectedRepositoryCount: viewModel.selectedRepositoryIDs.count,
+        isBusy: viewModel.isBusy,
+        onCancel: {
+          isShowingTagInput = false
+        },
+        onContinue: {
+          guard viewModel.canCreateAndPushTag else { return }
+          let repositories = viewModel.selectedRepositories
+          pendingAction = .createAndPush(
+            viewModel.tagName.trimmingCharacters(in: .whitespacesAndNewlines),
+            viewModel.tagMessage.trimmingCharacters(in: .whitespacesAndNewlines),
+            Set(repositories.map(\.id)),
+            repositories.map(\.name)
+          )
+          isShowingTagInput = false
+        }
+      )
     }
     .confirmationDialog(
       pendingAction?.title ?? "确认 Tag 操作？",
@@ -154,6 +183,13 @@ public struct TagManagementView: View {
     } message: {
       Text(pendingAction?.message ?? "")
     }
+  }
+
+  private var operationHint: String {
+    if viewModel.selectedRepositoryIDs.isEmpty {
+      return "请先在下方仓库列表选择一个或多个仓库。"
+    }
+    return "将为下方选中的 \(viewModel.selectedRepositoryIDs.count) 个仓库统一创建并推送同一个 Tag。"
   }
 
   @ViewBuilder
@@ -181,6 +217,10 @@ public struct TagManagementView: View {
 private enum PendingTagAction {
   case createAndPush(String, String, Set<String>, [String])
   case retryPush(String, String, String)
+
+  var requiresPostInputConfirmation: Bool {
+    if case .createAndPush = self { true } else { false }
+  }
 
   var title: String {
     switch self {
