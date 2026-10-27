@@ -432,6 +432,51 @@ final class ReposYAMLServiceTests: XCTestCase {
     XCTAssertTrue(try ReposYAMLService().loadTags(at: repositoryWithoutOrigin.path).tags.contains { $0.name == "v1.0.0" })
   }
 
+  @MainActor
+  func testTagBatchCanCreateLocalTagWithoutPushing() async throws {
+    let remote = temporaryDirectory.appending(path: "tag-local-only-remote.git", directoryHint: .isDirectory)
+    let repository = temporaryDirectory.appending(path: "tag-local-only-repository", directoryHint: .isDirectory)
+    try runGit("init --bare \(shellEscaped(remote.path))", at: temporaryDirectory)
+    try makeSeedRepository(
+      at: repository,
+      remote: remote,
+      fileName: "release.txt",
+      content: "release content"
+    )
+
+    let repoInfo = RepoSwitchInfo(
+      name: "Workspace",
+      path: ".",
+      absolutePath: repository.path,
+      currentBranch: "master",
+      targetBranch: "master",
+      isCloned: true,
+      scope: .workspace
+    )
+    let viewModel = TagManagementViewModel()
+    viewModel.repositories = [repoInfo]
+    viewModel.selectedRepositoryIDs = [repoInfo.id]
+    viewModel.createAndPushTag(
+      name: "v1.0.0-local",
+      message: "Local release",
+      repositoryIDs: [repoInfo.id],
+      pushToRemote: false
+    )
+
+    let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    XCTAssertFalse(viewModel.isBusy, "本地 Tag 创建应在 20 秒内结束")
+    XCTAssertEqual(viewModel.operationResults.map(\.status), [.success])
+    XCTAssertTrue(viewModel.operationResults.first?.message.contains("未推送到远程") == true)
+    let tag = try XCTUnwrap(ReposYAMLService().loadTags(at: repository.path).tags.first)
+    XCTAssertEqual(tag.name, "v1.0.0-local")
+    XCTAssertNotNil(tag.localObjectID)
+    XCTAssertNil(tag.remoteObjectID)
+  }
+
   func testTagManagementRejectsInvalidTagName() throws {
     let repository = temporaryDirectory.appending(path: "invalid-tag-repository", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)

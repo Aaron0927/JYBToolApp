@@ -3,6 +3,7 @@ import SwiftUI
 struct TagInputSheet: View {
   @Binding var tagName: String
   @Binding var tagMessage: String
+  @Binding var pushToRemote: Bool
 
   let selectedRepositoryCount: Int
   let isBusy: Bool
@@ -35,8 +36,14 @@ struct TagInputSheet: View {
         .accessibilityLabel("Tag 附注说明")
         .disabled(isBusy)
 
+      Toggle("推送到远程", isOn: $pushToRemote)
+        .toggleStyle(.checkbox)
+        .disabled(isBusy)
+
       HStack {
-        Text("Tag 会基于每个仓库当前 HEAD 创建，并推送到 origin。")
+        Text(pushToRemote
+          ? "Tag 会基于每个仓库当前 HEAD 创建，并推送到 origin。"
+          : "Tag 只会在每个仓库本地创建，不会推送到远程。")
           .font(.caption)
           .foregroundStyle(.secondary)
         Spacer()
@@ -54,4 +61,16 @@ struct TagInputSheet: View {
     .padding(24)
     .frame(width: 480)
   }
+}
+
+#Preview {
+  TagInputSheet(
+    tagName: .constant("v8.4.21"),
+    tagMessage: .constant("Release v8.4.21"),
+    pushToRemote: .constant(true),
+    selectedRepositoryCount: 2,
+    isBusy: false,
+    onCancel: {},
+    onContinue: {}
+  )
 }

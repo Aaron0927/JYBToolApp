@@ -33,7 +33,7 @@ public final class TagManagementViewModel {
     !repositories.isEmpty && selectedRepositoryIDs.count == repositories.count
   }
 
-  public var canCreateAndPushTag: Bool {
+  public var canCreateTag: Bool {
     !selectedRepositories.isEmpty &&
       !tagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
       !tagMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -109,7 +109,12 @@ public final class TagManagementViewModel {
     errorMessage = nil
   }
 
-  public func createAndPushTag(name: String, message: String, repositoryIDs: Set<String>) {
+  public func createAndPushTag(
+    name: String,
+    message: String,
+    repositoryIDs: Set<String>,
+    pushToRemote: Bool = true
+  ) {
     let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
     let message = message.trimmingCharacters(in: .whitespacesAndNewlines)
     let targets = repositories.filter { repositoryIDs.contains($0.id) }
@@ -132,7 +137,12 @@ public final class TagManagementViewModel {
       guard let self else { return }
       for (index, repository) in targets.enumerated() {
         self.operationProgress = "正在处理 \(repository.name)（\(index + 1)/\(targets.count)）…"
-        let result = await Self.createAndPushTag(name, message: message, in: repository)
+        let result = await Self.createAndPushTag(
+          name,
+          message: message,
+          pushToRemote: pushToRemote,
+          in: repository
+        )
         self.operationResults.append(result)
         Self.log(result)
       }
@@ -181,6 +191,7 @@ public final class TagManagementViewModel {
   private static func createAndPushTag(
     _ name: String,
     message: String,
+    pushToRemote: Bool,
     in repository: RepoSwitchInfo
   ) async -> TagRepositoryOperationResult {
     guard repository.isCloned else {
@@ -195,13 +206,20 @@ public final class TagManagementViewModel {
 
     return await Task.detached(priority: .userInitiated) {
       do {
-        try ReposYAMLService().createAndPushTag(name, message: message, at: repository.absolutePath)
+        let service = ReposYAMLService()
+        if pushToRemote {
+          try service.createAndPushTag(name, message: message, at: repository.absolutePath)
+        } else {
+          try service.createTag(name, message: message, at: repository.absolutePath)
+        }
         return TagRepositoryOperationResult(
           repositoryID: repository.id,
           repositoryName: repository.name,
           tagName: name,
           status: .success,
-          message: "已在当前 HEAD 创建并推送到 origin。"
+          message: pushToRemote
+            ? "已在当前 HEAD 创建并推送到 origin。"
+            : "已在当前 HEAD 创建本地 Tag，未推送到远程。"
         )
       } catch let error as ReposYAMLServiceError {
         let status: TagRepositoryOperationStatus

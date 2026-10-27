@@ -6,6 +6,7 @@ public struct TagManagementView: View {
   @State private var pendingAction: PendingTagAction?
   @State private var isShowingTagInput = false
   @State private var isShowingConfirmation = false
+  @State private var pushTagToRemote = true
 
   public init(viewModel: TagManagementViewModel) {
     self.viewModel = viewModel
@@ -142,17 +143,19 @@ public struct TagManagementView: View {
       TagInputSheet(
         tagName: $viewModel.tagName,
         tagMessage: $viewModel.tagMessage,
+        pushToRemote: $pushTagToRemote,
         selectedRepositoryCount: viewModel.selectedRepositoryIDs.count,
         isBusy: viewModel.isBusy,
         onCancel: {
           isShowingTagInput = false
         },
         onContinue: {
-          guard viewModel.canCreateAndPushTag else { return }
+          guard viewModel.canCreateTag else { return }
           let repositories = viewModel.selectedRepositories
-          pendingAction = .createAndPush(
+          pendingAction = .createTag(
             viewModel.tagName.trimmingCharacters(in: .whitespacesAndNewlines),
             viewModel.tagMessage.trimmingCharacters(in: .whitespacesAndNewlines),
+            pushTagToRemote,
             Set(repositories.map(\.id)),
             repositories.map(\.name)
           )
@@ -168,8 +171,13 @@ public struct TagManagementView: View {
       if let pendingAction {
         Button(pendingAction.confirmationTitle) {
           switch pendingAction {
-          case .createAndPush(let name, let message, let repositoryIDs, _):
-            viewModel.createAndPushTag(name: name, message: message, repositoryIDs: repositoryIDs)
+          case .createTag(let name, let message, let pushToRemote, let repositoryIDs, _):
+            viewModel.createAndPushTag(
+              name: name,
+              message: message,
+              repositoryIDs: repositoryIDs,
+              pushToRemote: pushToRemote
+            )
           case .retryPush(let repositoryID, _, _):
             viewModel.retryTagPush(for: repositoryID)
           }
@@ -189,7 +197,7 @@ public struct TagManagementView: View {
     if viewModel.selectedRepositoryIDs.isEmpty {
       return "请先在下方仓库列表选择一个或多个仓库。"
     }
-    return "将为下方选中的 \(viewModel.selectedRepositoryIDs.count) 个仓库统一创建并推送同一个 Tag。"
+    return "将为下方选中的 \(viewModel.selectedRepositoryIDs.count) 个仓库统一创建同一个 Tag；是否推送可在弹框中选择。"
   }
 
   @ViewBuilder
@@ -215,31 +223,35 @@ public struct TagManagementView: View {
 }
 
 private enum PendingTagAction {
-  case createAndPush(String, String, Set<String>, [String])
+  case createTag(String, String, Bool, Set<String>, [String])
   case retryPush(String, String, String)
 
   var requiresPostInputConfirmation: Bool {
-    if case .createAndPush = self { true } else { false }
+    if case .createTag = self { true } else { false }
   }
 
   var title: String {
     switch self {
-    case .createAndPush: "确认统一设置并推送 Tag？"
+    case .createTag(_, _, true, _, _): "确认统一创建并推送 Tag？"
+    case .createTag: "确认仅创建本地 Tag？"
     case .retryPush: "确认重试推送 Tag？"
     }
   }
 
   var confirmationTitle: String {
     switch self {
-    case .createAndPush: "设置并推送"
+    case .createTag(_, _, true, _, _): "创建并推送"
+    case .createTag: "仅创建 Tag"
     case .retryPush: "推送到 origin"
     }
   }
 
   var message: String {
     switch self {
-    case .createAndPush(let name, let message, _, let repositoryNames):
+    case .createTag(let name, let message, true, _, let repositoryNames):
       "将在 \(repositoryNames.count) 个仓库的当前 HEAD 创建 annotated Tag「\(name)」并推送到 origin。仓库：\(repositoryNames.joined(separator: "、"))。附注：\(message)"
+    case .createTag(let name, let message, false, _, let repositoryNames):
+      "将在 \(repositoryNames.count) 个仓库的当前 HEAD 创建 annotated Tag「\(name)」，仅保留在本地，不推送到远程。仓库：\(repositoryNames.joined(separator: "、"))。附注：\(message)"
     case .retryPush(_, let repositoryName, let name):
       "将把仓库「\(repositoryName)」中本地已创建的 Tag「\(name)」推送到 origin。"
     }
