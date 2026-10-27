@@ -201,7 +201,6 @@ public final class ReposYAMLService: Sendable {
         absolutePath: repoURL.path,
         currentBranch: isCloned ? (getCurrentBranch(at: repoURL.path) ?? "unknown") : "未克隆",
         targetBranch: repo.branch,
-        targetTag: repo.tag,
         isCloned: isCloned
       )
     }
@@ -316,6 +315,15 @@ public final class ReposYAMLService: Sendable {
     return results
   }
 
+  public func updateRepositories(
+    _ repositories: [RepoSwitchInfo],
+    logger: @escaping @Sendable (String) -> Void
+  ) -> [RepoPullResult] {
+    repositories.map { repo in
+      pullRepository(name: repo.name, path: repo.absolutePath, logger: logger)
+    }
+  }
+
   public func makeWorkspaceRepoInfo(rootPath: String, targetBranch: String) -> RepoSwitchInfo {
     let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true).standardizedFileURL
     let isRepo = isGitRepository(at: rootURL.path)
@@ -388,7 +396,6 @@ public final class ReposYAMLService: Sendable {
         name: repo.name,
         path: repoURL.path,
         branch: repo.branch,
-        tag: repo.tag,
         logger: logger
       )
       logger("\(repo.name) 完成")
@@ -410,7 +417,7 @@ public final class ReposYAMLService: Sendable {
         throw ReposYAMLServiceError.notGitRepository(path)
       }
 
-      try updateGitRepository(name: name, path: path, branch: branch, tag: nil, logger: logger)
+      try updateGitRepository(name: name, path: path, branch: branch, logger: logger)
       logger("\(name) 完成")
       return RepoSwitchResult(name: name, success: true)
     } catch {
@@ -612,7 +619,6 @@ public final class ReposYAMLService: Sendable {
     name: String,
     path: String,
     branch: String,
-    tag: String?,
     logger: @escaping @Sendable (String) -> Void
   ) throws {
     let hadChanges = hasTrackedChanges(at: path)
@@ -622,12 +628,8 @@ public final class ReposYAMLService: Sendable {
     }
 
     do {
-      if let tag = normalizedOptionalValue(tag) {
-        try checkoutTag(tag, repoName: name, at: path, logger: logger)
-      } else {
-        try checkout(branch, at: path, logger: logger)
-        try pull(branch, at: path, logger: logger)
-      }
+      try checkout(branch, at: path, logger: logger)
+      try pull(branch, at: path, logger: logger)
     } catch {
       if hadChanges {
         logger("\(name) 切换失败，尝试恢复暂存")
@@ -698,17 +700,21 @@ public final class ReposYAMLService: Sendable {
     _ = try processRunner.run("git pull origin \(escapedBranch)", at: path, timeout: 180)
   }
 
-  private func checkoutTag(
+  public func checkoutTag(
     _ tag: String,
-    repoName: String,
     at path: String,
     logger: @escaping @Sendable (String) -> Void
   ) throws {
+    guard isGitRepository(at: path) else {
+      throw ReposYAMLServiceError.notGitRepository(path)
+    }
+    try validateTagName(tag, at: path)
+
     logger("拉取 tags: \(tag)")
     _ = try processRunner.run("git fetch --tags", at: path, timeout: 180)
 
     guard try tagExists(tag, at: path) else {
-      throw ReposYAMLServiceError.tagNotFound(repo: repoName, tag: tag)
+      throw ReposYAMLServiceError.tagNotFound(repo: URL(fileURLWithPath: path).lastPathComponent, tag: tag)
     }
 
     logger("按 tag 切换: \(tag)")

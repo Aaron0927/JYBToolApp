@@ -28,7 +28,7 @@ struct ContentView: View {
                 HStack {
                   Label(tool.name, systemImage: tool.icon)
                   Spacer(minLength: 8)
-                  if tool.isDeprecated {
+                  if tool.isDeprecated && !tool.name.contains("已过时") {
                     Text("已过时")
                       .font(.caption2)
                       .foregroundStyle(.secondary)
@@ -39,7 +39,7 @@ struct ContentView: View {
                 }
                   .tag(tool.id)
                   .accessibilityIdentifier("tool-\(tool.id)")
-                  .accessibilityLabel(tool.isDeprecated ? "\(tool.name)，已过时" : tool.name)
+                  .accessibilityLabel(tool.isDeprecated && !tool.name.contains("已过时") ? "\(tool.name)，已过时" : tool.name)
               }
             }
           }

@@ -12,8 +12,8 @@ public struct ReposSwitchView: View {
   public var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       ToolPageHeader(
-        title: "依赖仓库切换",
-        subtitle: "读取主工程的 repos.yml，预览依赖仓库目标分支或 Tag 后批量切换。",
+        title: "分支切换",
+        subtitle: "读取主工程的 repos.yml，预览目标分支后批量切换公版仓库。Tag 切换请到 Tag 管理中选择目标。",
         systemImage: "shippingbox"
       )
 
@@ -140,7 +140,7 @@ public struct ReposSwitchView: View {
       }
       Button("取消", role: .cancel) {}
     } message: {
-      Text("将按 repos.yml 对主工作区及依赖仓库切换分支或 Tag。存在本地修改的仓库可能无法切换。")
+      Text("将按 repos.yml 对主工作区及依赖仓库切换分支。Tag 切换由 Tag 管理页面单独执行。存在本地修改的仓库可能无法切换。")
     }
   }
 
@@ -179,7 +179,7 @@ private struct RepoSwitchRow: View {
           .accessibilityHidden(true)
         Text(targetValue)
           .foregroundStyle(.tint)
-        ToolStatusBadge(repo.targetTag == nil ? "分支" : "Tag")
+              ToolStatusBadge("分支")
         Spacer()
       }
       .font(.system(.caption, design: .monospaced))
@@ -203,7 +203,7 @@ private struct RepoSwitchRow: View {
   }
 
   private var targetValue: String {
-    repo.targetTag ?? repo.targetBranch
+    repo.targetBranch
   }
 
   private var iconName: String {

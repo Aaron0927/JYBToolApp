@@ -92,6 +92,28 @@ final class ReposYAMLServiceTests: XCTestCase {
     )
   }
 
+  func testUpdateRepositoriesOnlyUpdatesSelectedRepositories() throws {
+    let fixture = try makePullFixture()
+    try commitAndPushChange(in: fixture.workspaceUpdater, fileName: "workspace.txt", content: "workspace remote update")
+    try commitAndPushChange(in: fixture.dependencyUpdater, fileName: "dependency.txt", content: "dependency remote update")
+
+    let service = ReposYAMLService()
+    let loaded = try service.loadRepoInfos(atProjectPath: fixture.project.path)
+    let selectedDependency = try XCTUnwrap(loaded.infos.first { $0.name == "Dependency" })
+    let results = service.updateRepositories([selectedDependency]) { _ in }
+
+    XCTAssertEqual(results.count, 1)
+    XCTAssertEqual(results.first?.status, .success)
+    XCTAssertEqual(
+      try String(contentsOf: fixture.dependency.appending(path: "dependency.txt"), encoding: .utf8),
+      "dependency remote update"
+    )
+    XCTAssertEqual(
+      try String(contentsOf: fixture.project.appending(path: "workspace.txt"), encoding: .utf8),
+      "workspace initial"
+    )
+  }
+
   func testParseReposConfig() throws {
     let service = ReposYAMLService()
     let content = """
@@ -208,7 +230,7 @@ final class ReposYAMLServiceTests: XCTestCase {
     }
   }
 
-  func testUpdateRepoPrefersTagOverBranch() throws {
+  func testUpdateRepoUsesBranchEvenWhenLegacyTagFieldIsPresent() throws {
     let remote = temporaryDirectory.appending(path: "dependency.git", directoryHint: .isDirectory)
     let seed = temporaryDirectory.appending(path: "dependency-seed", directoryHint: .isDirectory)
     let root = temporaryDirectory.appending(path: "root", directoryHint: .isDirectory)
@@ -234,10 +256,34 @@ final class ReposYAMLServiceTests: XCTestCase {
     let dependency = root.appending(path: "Dependency", directoryHint: .isDirectory)
     XCTAssertEqual(
       try String(contentsOf: dependency.appending(path: "dependency.txt"), encoding: .utf8),
-      "tag content"
+      "branch content"
     )
-    XCTAssertEqual(try runGitOutput("branch --show-current", at: dependency), "")
-    XCTAssertEqual(try runGitOutput("describe --tags --exact-match", at: dependency), "v1.0.0")
+    XCTAssertEqual(try runGitOutput("branch --show-current", at: dependency), "master")
+  }
+
+  func testTagManagementChecksOutRemoteOnlyTag() throws {
+    let remote = temporaryDirectory.appending(path: "checkout-tag-remote.git", directoryHint: .isDirectory)
+    let repository = temporaryDirectory.appending(path: "checkout-tag-repository", directoryHint: .isDirectory)
+    try runGit("init --bare \(shellEscaped(remote.path))", at: temporaryDirectory)
+    try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+    try runGit("init", at: repository)
+    try configureGitUser(at: repository)
+    try "release content".write(to: repository.appending(path: "release.txt"), atomically: true, encoding: .utf8)
+    try runGit("add release.txt", at: repository)
+    try runGit("commit -m 'Release commit'", at: repository)
+    try runGit("remote add origin \(shellEscaped(remote.path))", at: repository)
+    try runGit("push -u origin HEAD", at: repository)
+    try runGit("tag -a v2.0.0 -m 'Second release'", at: repository)
+    try runGit("push origin v2.0.0", at: repository)
+
+    let service = ReposYAMLService()
+    try service.deleteLocalTag("v2.0.0", at: repository.path)
+    XCTAssertNil(try service.loadTags(at: repository.path).tags.first?.localObjectID)
+
+    try service.checkoutTag("v2.0.0", at: repository.path) { _ in }
+
+    XCTAssertEqual(try runGitOutput("branch --show-current", at: repository), "")
+    XCTAssertEqual(try runGitOutput("describe --tags --exact-match", at: repository), "v2.0.0")
   }
 
   func testTagManagementCreatesPushesAndDeletesTags() throws {

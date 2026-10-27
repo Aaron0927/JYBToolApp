@@ -30,6 +30,7 @@ public final class ReposSwitchViewModel {
   public var operationSummary: String?
   public var operationResults: [String: String] = [:]
   public var operationDetails: [String: String] = [:]
+  public var selectedPullRepositoryIDs: Set<String> = []
 
   private let service = ReposYAMLService()
   private var currentTask: Task<Void, Never>?
@@ -59,6 +60,30 @@ public final class ReposSwitchViewModel {
 
   public var isBusy: Bool {
     isLoading || isSwitching || isPulling
+  }
+
+  public var isAllPullRepositoriesSelected: Bool {
+    !repos.isEmpty && repos.allSatisfy { selectedPullRepositoryIDs.contains($0.id) }
+  }
+
+  public var selectedPullRepositoryCount: Int {
+    repos.filter { selectedPullRepositoryIDs.contains($0.id) }.count
+  }
+
+  public func setPullRepository(_ repositoryID: String, selected: Bool) {
+    if selected {
+      selectedPullRepositoryIDs.insert(repositoryID)
+    } else {
+      selectedPullRepositoryIDs.remove(repositoryID)
+    }
+  }
+
+  public func toggleAllPullRepositories() {
+    if isAllPullRepositoriesSelected {
+      selectedPullRepositoryIDs = []
+    } else {
+      selectedPullRepositoryIDs = Set(repos.map(\.id))
+    }
   }
 
   public func selectProject() {
@@ -165,7 +190,7 @@ public final class ReposSwitchViewModel {
 
     let currentProjectPath = projectPath
     currentTask = Task { @MainActor in
-      let result = await Task.detached { () -> LoadResult in
+      let result = await Task.detached { () -> PullPreviewResult in
         do {
           let service = ReposYAMLService()
           let loaded = try service.loadRepoInfos(atProjectPath: currentProjectPath)
@@ -174,7 +199,7 @@ public final class ReposSwitchViewModel {
             rootPath: loaded.rootPath,
             targetBranch: workspaceBranch
           )
-          return LoadResult(
+          return PullPreviewResult(
             config: loaded.config,
             rootPath: loaded.rootPath,
             repos: [workspaceInfo] + loaded.infos,
@@ -182,7 +207,13 @@ public final class ReposSwitchViewModel {
             error: nil
           )
         } catch {
-          return LoadResult(config: nil, rootPath: "", repos: [], currentBranch: "", error: error.localizedDescription)
+          return PullPreviewResult(
+            config: nil,
+            rootPath: "",
+            repos: [],
+            currentBranch: "",
+            error: error.localizedDescription
+          )
         }
       }.value
 
@@ -273,29 +304,26 @@ public final class ReposSwitchViewModel {
     }
   }
 
-  public func pullAllRepositories() {
-    guard !projectPath.isEmpty, isPullPreviewLoaded else { return }
+  public func updateSelectedRepositories() {
+    let selectedRepositories = repos.filter { selectedPullRepositoryIDs.contains($0.id) }
+    guard !projectPath.isEmpty, isPullPreviewLoaded, !selectedRepositories.isEmpty else { return }
     currentTask?.cancel()
     isPulling = true
     pullSummary = nil
     operationSummary = nil
     operationResults = [:]
     operationDetails = [:]
-    LogManager.shared.info("========== 开始拉取公版全部仓库 ==========")
+    LogManager.shared.info("========== 开始更新已选择的公版仓库（\(selectedRepositories.count) 个） ==========")
 
-    let currentProjectPath = projectPath
     currentTask = Task { @MainActor in
       let result = await Task.detached { () -> PullResult in
-        do {
-          let results = try ReposYAMLService().pullAllRepositories(atProjectPath: currentProjectPath) { message in
-            Task { @MainActor in
-              LogManager.shared.debug(message)
-            }
+        let service = ReposYAMLService()
+        let results = service.updateRepositories(selectedRepositories) { message in
+          Task { @MainActor in
+            LogManager.shared.debug(message)
           }
-          return PullResult(results: results, error: nil)
-        } catch {
-          return PullResult(results: [], error: error.localizedDescription)
         }
+        return PullResult(results: results)
       }.value
 
       finishPull(result)
@@ -371,15 +399,11 @@ public final class ReposSwitchViewModel {
     LogManager.shared.success("已读取 \(repos.count) 个仓库")
     LogManager.shared.info("仓库根目录: \(rootPath)")
     for repo in repos {
-      if let targetTag = repo.targetTag {
-        LogManager.shared.info("\(repo.name)\t当前分支: \(repo.currentBranch) -> 目标Tag: \(targetTag)")
-      } else {
-        LogManager.shared.info("\(repo.name)\t当前分支: \(repo.currentBranch) -> 目标分支: \(repo.targetBranch)")
-      }
+      LogManager.shared.info("\(repo.name)\t当前分支: \(repo.currentBranch) -> 目标分支: \(repo.targetBranch)")
     }
   }
 
-  private func finishPullPreview(_ result: LoadResult) {
+  private func finishPullPreview(_ result: PullPreviewResult) {
     isLoading = false
     currentTask = nil
 
@@ -389,7 +413,8 @@ public final class ReposSwitchViewModel {
       rootPath = ""
       loadErrorMessage = error
       isPullPreviewLoaded = false
-      LogManager.shared.error("读取拉取范围失败: \(error)")
+      selectedPullRepositoryIDs = []
+      LogManager.shared.error("读取仓库更新范围失败: \(error)")
       return
     }
 
@@ -397,13 +422,14 @@ public final class ReposSwitchViewModel {
     loadErrorMessage = nil
     rootPath = result.rootPath
     repos = result.repos
+    selectedPullRepositoryIDs = Set(repos.map(\.id))
     currentBranch = result.currentBranch
     isPullPreviewLoaded = !repos.isEmpty
     pullSummary = nil
     operationSummary = nil
     operationResults = [:]
     operationDetails = [:]
-    LogManager.shared.success("已读取 \(repos.count) 个仓库的拉取范围")
+    LogManager.shared.success("已读取 \(repos.count) 个仓库")
     LogManager.shared.info("仓库根目录: \(rootPath)")
   }
 
@@ -443,14 +469,7 @@ public final class ReposSwitchViewModel {
       currentTask = nil
     }
 
-    if let error = result.error {
-      pullSummary = "拉取失败：\(error)"
-      operationSummary = pullSummary
-      loadErrorMessage = error
-      LogManager.shared.error("========== 拉取失败：\(error) ==========")
-      return
-    }
-
+    let repositoryByPath = Dictionary(uniqueKeysWithValues: repos.map { ($0.absolutePath, $0) })
     operationResults = Dictionary(uniqueKeysWithValues: result.results.map { result in
       let title: String
       switch result.status {
@@ -458,31 +477,30 @@ public final class ReposSwitchViewModel {
       case .skipped: title = "跳过"
       case .failed: title = "失败"
       }
-      return (result.name, title)
+      return (repositoryByPath[result.path]?.id ?? result.path, title)
     })
     operationDetails = Dictionary(uniqueKeysWithValues: result.results.compactMap { result in
-      result.message.map { (result.name, $0) }
+      result.message.map { (repositoryByPath[result.path]?.id ?? result.path, $0) }
     })
-
     for repo in result.results {
       switch repo.status {
       case .success:
         let stashNote = repo.hadAutoStash ? "，已恢复本地改动" : ""
-        LogManager.shared.success("✓ \(repo.name) 拉取成功\(stashNote)")
+        LogManager.shared.success("✓ \(repo.name) 更新成功\(stashNote)")
       case .skipped:
         LogManager.shared.info("- \(repo.name) 已跳过：\(repo.message ?? "未知原因")")
       case .failed:
-        LogManager.shared.error("✗ \(repo.name) 拉取失败：\(repo.message ?? "未知错误")")
+        LogManager.shared.error("✗ \(repo.name) 更新失败：\(repo.message ?? "未知错误")")
       }
     }
 
     let successCount = result.results.filter { $0.status == .success }.count
     let skippedCount = result.results.filter { $0.status == .skipped }.count
     let failedCount = result.results.filter { $0.status == .failed }.count
-    pullSummary = "最近拉取：成功 \(successCount)，跳过 \(skippedCount)，失败 \(failedCount)"
+    pullSummary = "最近更新：成功 \(successCount)，跳过 \(skippedCount)，失败 \(failedCount)"
     operationSummary = pullSummary
     loadErrorMessage = nil
-    LogManager.shared.info("========== \(pullSummary ?? "拉取完成") ==========")
+    LogManager.shared.info("========== \(pullSummary ?? "更新完成") ==========")
   }
 
   private func saveLastProjectPath() {
@@ -499,6 +517,7 @@ public final class ReposSwitchViewModel {
     operationSummary = nil
     operationResults = [:]
     operationDetails = [:]
+    selectedPullRepositoryIDs = []
   }
 
   private func findWorkspace(in path: String) -> URL? {
@@ -529,6 +548,13 @@ public final class ReposSwitchViewModel {
 
   private struct PullResult: Sendable {
     let results: [RepoPullResult]
+  }
+
+  private struct PullPreviewResult: Sendable {
+    let config: ReposConfig?
+    let rootPath: String
+    let repos: [RepoSwitchInfo]
+    let currentBranch: String
     let error: String?
   }
 }

@@ -15,7 +15,7 @@ public struct TagManagementView: View {
       VStack(alignment: .leading, spacing: 16) {
         ToolPageHeader(
           title: "Tag 管理",
-          subtitle: "查看公版仓库的本地和远端 Tag，并创建、推送或删除 Tag。",
+          subtitle: "查看公版仓库的本地和远端 Tag，并切换到指定 Tag、创建、推送或删除 Tag。",
           systemImage: "tag"
         )
 
@@ -147,6 +147,10 @@ public struct TagManagementView: View {
                     deleteRemote: {
                       pendingAction = .deleteRemote(tag.name)
                       isShowingConfirmation = true
+                    },
+                    checkout: {
+                      pendingAction = .checkout(tag.name)
+                      isShowingConfirmation = true
                     }
                   )
                 }
@@ -175,6 +179,8 @@ public struct TagManagementView: View {
             viewModel.deleteLocalTag(name)
           case .deleteRemote(let name):
             viewModel.deleteRemoteTag(name)
+          case .checkout(let name):
+            viewModel.checkoutTag(name)
           }
           self.pendingAction = nil
         }
@@ -195,6 +201,7 @@ private struct TagManagementRow: View {
   let push: () -> Void
   let deleteLocal: () -> Void
   let deleteRemote: () -> Void
+  let checkout: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -221,6 +228,10 @@ private struct TagManagementRow: View {
 
       HStack {
         Spacer()
+        Button("切换到此 Tag", systemImage: "arrow.uturn.down") {
+          checkout()
+        }
+        .disabled(isDisabled)
         if tag.localObjectID != nil, hasOrigin, tag.localObjectID != tag.remoteObjectID {
           Button("推送", systemImage: "arrow.up") {
             push()
@@ -252,6 +263,7 @@ private enum PendingTagAction {
   case push(String)
   case deleteLocal(String)
   case deleteRemote(String)
+  case checkout(String)
 
   var title: String {
     switch self {
@@ -259,6 +271,7 @@ private enum PendingTagAction {
     case .push: "确认推送 Tag？"
     case .deleteLocal: "确认删除本地 Tag？"
     case .deleteRemote: "确认删除远端 Tag？"
+    case .checkout: "确认切换到 Tag？"
     }
   }
 
@@ -268,6 +281,7 @@ private enum PendingTagAction {
     case .push: "推送到 origin"
     case .deleteLocal: "删除本地 Tag"
     case .deleteRemote: "删除远端 Tag"
+    case .checkout: "切换到此 Tag"
     }
   }
 
@@ -281,13 +295,15 @@ private enum PendingTagAction {
       "只删除本机上的 Tag“\(name)”，远端副本不受影响。"
     case .deleteRemote(let name):
       "将从 origin 删除 Tag“\(name)”。其他协作者将无法再从 origin 获取该 Tag。"
+    case .checkout(let name):
+      "将在所选仓库 fetch Tag“\(name)”并切换到该提交的 detached HEAD。"
     }
   }
 
   var isDestructive: Bool {
     switch self {
     case .deleteLocal, .deleteRemote: true
-    case .create, .push: false
+    case .create, .push, .checkout: false
     }
   }
 }

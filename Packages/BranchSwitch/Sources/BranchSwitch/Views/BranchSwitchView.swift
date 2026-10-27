@@ -12,7 +12,7 @@ public struct BranchSwitchView: View {
   public var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       ToolPageHeader(
-        title: "主仓库子模块切换",
+        title: "分支切换（已过时）",
         subtitle: "已过时工具。选择主仓库分支后，可查看并同步子模块目标。",
         systemImage: "arrow.triangle.branch"
       )

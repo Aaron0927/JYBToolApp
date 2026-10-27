@@ -3,7 +3,7 @@ import ToolUI
 
 public struct PullLatestView: View {
   @Bindable private var viewModel: ReposSwitchViewModel
-  @State private var isConfirmingPull = false
+  @State private var isConfirmingUpdate = false
 
   public init(viewModel: ReposSwitchViewModel) {
     self.viewModel = viewModel
@@ -13,12 +13,12 @@ public struct PullLatestView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         ToolPageHeader(
-          title: "拉取最新",
-          subtitle: "只更新当前分支，不切换分支。脏工作区会先暂存，完成后尝试恢复。",
-          systemImage: "arrow.down.to.line.compact"
+          title: "仓库更新",
+          subtitle: "读取 repos.yml 后选择需要更新的仓库，沿用当前分支的拉取最新操作。",
+          systemImage: "arrow.triangle.2.circlepath"
         )
 
-        ToolPanel("主工程与拉取范围", systemImage: "folder") {
+        ToolPanel("主工程与仓库范围", systemImage: "folder") {
           HStack {
             TextField("选择公版主工程目录", text: $viewModel.projectPath)
               .disabled(true)
@@ -29,10 +29,10 @@ public struct PullLatestView: View {
             }
             .disabled(viewModel.isBusy)
 
-            Button("读取拉取范围", systemImage: "doc.text.magnifyingglass") {
+            Button("读取仓库", systemImage: "arrow.triangle.2.circlepath") {
               viewModel.loadPullPreview()
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
             .disabled(viewModel.projectPath.isEmpty || viewModel.isBusy)
           }
 
@@ -48,29 +48,37 @@ public struct PullLatestView: View {
               .textSelection(.enabled)
           }
           if viewModel.isLoading {
-            ProgressView("正在读取配置和仓库状态…")
+            ProgressView("正在读取 repos.yml…")
               .controlSize(.small)
           }
         }
 
-        ToolPanel("仓库拉取状态", systemImage: "shippingbox") {
+        ToolPanel("选择仓库", systemImage: "shippingbox") {
           if viewModel.repos.isEmpty {
             ContentUnavailableView(
-              "尚未读取拉取范围",
+              "尚未读取仓库",
               systemImage: "shippingbox",
-              description: Text("读取后会列出主仓库和 repos.yml 中的所有依赖仓库。")
+              description: Text("读取后会列出主仓库和 repos.yml 中的全部仓库，可逐个选择或全选。")
             )
             .frame(maxWidth: .infinity, minHeight: 140)
           } else {
             HStack {
-              Text("共 \(viewModel.repos.count) 个仓库")
+              Text("共 \(viewModel.repos.count) 个仓库 · 已选择 \(viewModel.selectedPullRepositoryCount) 个")
                 .foregroundStyle(.secondary)
               Spacer()
-              Button("拉取全部最新代码", systemImage: "arrow.down.to.line.compact") {
-                isConfirmingPull = true
+              Button(viewModel.isAllPullRepositoriesSelected ? "取消全选" : "全选", systemImage: "checkmark.circle") {
+                viewModel.toggleAllPullRepositories()
+              }
+              .disabled(viewModel.isBusy)
+              Button("更新所选仓库", systemImage: "arrow.down.to.line.compact") {
+                isConfirmingUpdate = true
               }
               .buttonStyle(.borderedProminent)
-              .disabled(!viewModel.isPullPreviewLoaded || viewModel.isBusy)
+              .disabled(
+                !viewModel.isPullPreviewLoaded ||
+                  viewModel.selectedPullRepositoryCount == 0 ||
+                  viewModel.isBusy
+              )
               .keyboardShortcut(.defaultAction)
             }
 
@@ -81,16 +89,18 @@ public struct PullLatestView: View {
             }
 
             if viewModel.isPulling {
-              ProgressView("正在逐仓拉取；单仓结果会持续更新…")
+              ProgressView("正在拉取所选仓库的最新内容…")
                 .controlSize(.small)
             }
 
             VStack(alignment: .leading, spacing: 8) {
               ForEach(viewModel.repos) { repo in
                 PullRepositoryRow(
+                  viewModel: viewModel,
                   repo: repo,
-                  result: viewModel.operationResults[repo.name],
-                  detail: viewModel.operationDetails[repo.name]
+                  isDisabled: viewModel.isBusy,
+                  result: viewModel.operationResults[repo.id],
+                  detail: viewModel.operationDetails[repo.id]
                 )
               }
             }
@@ -102,40 +112,46 @@ public struct PullLatestView: View {
       .frame(maxWidth: .infinity, alignment: .top)
     }
     .confirmationDialog(
-      "确认拉取全部公版仓库？",
-      isPresented: $isConfirmingPull,
+      "确认更新所选仓库？",
+      isPresented: $isConfirmingUpdate,
       titleVisibility: .visible
     ) {
-      Button("开始拉取") {
-        viewModel.pullAllRepositories()
+      Button("更新 \(viewModel.selectedPullRepositoryCount) 个仓库") {
+        viewModel.updateSelectedRepositories()
       }
       Button("取消", role: .cancel) {}
     } message: {
-      Text("将拉取预览中的 \(viewModel.repos.count) 个仓库。工具只更新当前分支；检测到本地改动时会先暂存并尝试恢复。")
+      Text("只更新当前分支。未选择的仓库保持不变；有本地改动的仓库会先暂存并在更新后尝试恢复。")
     }
   }
 }
 
 private struct PullRepositoryRow: View {
+  @Bindable var viewModel: ReposSwitchViewModel
   let repo: RepoSwitchInfo
+  let isDisabled: Bool
   let result: String?
   let detail: String?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       HStack {
-        Label(repo.name, systemImage: repo.scope == .workspace ? "building.2" : "folder")
+        Toggle(isOn: Binding(
+          get: { viewModel.selectedPullRepositoryIDs.contains(repo.id) },
+          set: { viewModel.setPullRepository(repo.id, selected: $0) }
+        )) {
+          Label(repo.name, systemImage: repo.scope == .workspace ? "building.2" : "folder")
+        }
+        .toggleStyle(.checkbox)
+        .disabled(isDisabled)
+
         Spacer()
         if let result {
           ToolStatusBadge(result, kind: resultKind)
-        } else if repo.isCloned {
-          ToolStatusBadge("待拉取", kind: .neutral)
-        } else {
-          ToolStatusBadge("路径不可用", kind: .failure)
         }
       }
 
-      Text(repo.absolutePath)
+      Text("当前分支：\(repo.currentBranch) · \(repo.absolutePath)")
         .font(.system(.caption, design: .monospaced))
         .foregroundStyle(.secondary)
         .textSelection(.enabled)

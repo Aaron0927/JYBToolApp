@@ -154,6 +154,10 @@ public final class TagManagementViewModel {
     perform(.deleteRemote(name))
   }
 
+  public func checkoutTag(_ name: String) {
+    perform(.checkout(name))
+  }
+
   private func perform(_ operation: TagOperation) {
     guard let repository = selectedRepository else { return }
     guard repository.isCloned else {
@@ -180,15 +184,29 @@ public final class TagManagementViewModel {
             try service.deleteLocalTag(name, at: path)
           case .deleteRemote(let name):
             try service.deleteRemoteTag(name, at: path)
+          case .checkout(let name):
+            try service.checkoutTag(name, at: path) { message in
+              Task { @MainActor in
+                LogManager.shared.debug(message)
+              }
+            }
           }
         } catch {
-          return TagActionResult(snapshot: nil, error: error.localizedDescription)
+          return TagActionResult(snapshot: nil, currentBranch: nil, error: error.localizedDescription)
         }
 
         do {
-          return TagActionResult(snapshot: try service.loadTags(at: path), error: nil)
+          return TagActionResult(
+            snapshot: try service.loadTags(at: path),
+            currentBranch: service.getCurrentBranch(at: path),
+            error: nil
+          )
         } catch {
-          return TagActionResult(snapshot: nil, error: "Tag 操作已完成，但刷新列表失败：\(error.localizedDescription)")
+          return TagActionResult(
+            snapshot: nil,
+            currentBranch: nil,
+            error: "Tag 操作已完成，但刷新列表失败：\(error.localizedDescription)"
+          )
         }
       }.value
 
@@ -200,6 +218,20 @@ public final class TagManagementViewModel {
         self.hasOrigin = snapshot.hasOrigin
         self.errorMessage = nil
         self.statusMessage = operation.successMessage
+        if let currentBranch = result.currentBranch, let repository = self.selectedRepository {
+          self.repositories = self.repositories.map { item in
+            guard item.id == repository.id else { return item }
+            return RepoSwitchInfo(
+              name: item.name,
+              path: item.path,
+              absolutePath: item.absolutePath,
+              currentBranch: currentBranch,
+              targetBranch: item.targetBranch,
+              isCloned: item.isCloned,
+              scope: item.scope
+            )
+          }
+        }
         if case .create = operation {
           self.tagName = ""
           self.tagMessage = ""
@@ -215,6 +247,7 @@ public final class TagManagementViewModel {
     case push(String)
     case deleteLocal(String)
     case deleteRemote(String)
+    case checkout(String)
 
     var successMessage: String {
       switch self {
@@ -222,6 +255,7 @@ public final class TagManagementViewModel {
       case .push(let name): "已推送 Tag \(name)"
       case .deleteLocal(let name): "已删除本地 Tag \(name)"
       case .deleteRemote(let name): "已删除远端 Tag \(name)"
+      case .checkout(let name): "已切换到 Tag \(name)（detached HEAD）"
       }
     }
   }
@@ -238,6 +272,7 @@ public final class TagManagementViewModel {
 
   private struct TagActionResult: Sendable {
     let snapshot: GitTagSnapshot?
+    let currentBranch: String?
     let error: String?
   }
 }

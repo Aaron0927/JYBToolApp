@@ -44,7 +44,6 @@ public struct RepoSwitchInfo: Identifiable, Equatable, Sendable {
   public let absolutePath: String
   public let currentBranch: String
   public let targetBranch: String
-  public let targetTag: String?
   public let isCloned: Bool
   public let scope: RepoSwitchScope
 
@@ -54,7 +53,6 @@ public struct RepoSwitchInfo: Identifiable, Equatable, Sendable {
     absolutePath: String,
     currentBranch: String,
     targetBranch: String,
-    targetTag: String? = nil,
     isCloned: Bool,
     scope: RepoSwitchScope = .dependency
   ) {
@@ -63,7 +61,6 @@ public struct RepoSwitchInfo: Identifiable, Equatable, Sendable {
     self.absolutePath = absolutePath
     self.currentBranch = currentBranch
     self.targetBranch = targetBranch
-    self.targetTag = targetTag
     self.isCloned = isCloned
     self.scope = scope
   }
