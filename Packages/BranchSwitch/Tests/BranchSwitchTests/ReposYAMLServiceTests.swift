@@ -371,6 +371,67 @@ final class ReposYAMLServiceTests: XCTestCase {
     XCTAssertNil(tag.remoteObjectID)
   }
 
+  @MainActor
+  func testTagBatchContinuesAfterOneRepositoryPushFails() async throws {
+    let remote = temporaryDirectory.appending(path: "tag-batch-remote.git", directoryHint: .isDirectory)
+    let successfulRepository = temporaryDirectory.appending(path: "tag-batch-success", directoryHint: .isDirectory)
+    let repositoryWithoutOrigin = temporaryDirectory.appending(path: "tag-batch-no-origin", directoryHint: .isDirectory)
+    try runGit("init --bare \(shellEscaped(remote.path))", at: temporaryDirectory)
+    try makeSeedRepository(
+      at: successfulRepository,
+      remote: remote,
+      fileName: "release.txt",
+      content: "release content"
+    )
+    try FileManager.default.createDirectory(at: repositoryWithoutOrigin, withIntermediateDirectories: true)
+    try runGit("init", at: repositoryWithoutOrigin)
+    try configureGitUser(at: repositoryWithoutOrigin)
+    try "local release".write(
+      to: repositoryWithoutOrigin.appending(path: "release.txt"),
+      atomically: true,
+      encoding: .utf8
+    )
+    try runGit("add release.txt", at: repositoryWithoutOrigin)
+    try runGit("commit -m 'Local release'", at: repositoryWithoutOrigin)
+
+    let workspace = RepoSwitchInfo(
+      name: "Workspace",
+      path: ".",
+      absolutePath: successfulRepository.path,
+      currentBranch: "master",
+      targetBranch: "master",
+      isCloned: true,
+      scope: .workspace
+    )
+    let dependency = RepoSwitchInfo(
+      name: "Dependency",
+      path: "Dependency",
+      absolutePath: repositoryWithoutOrigin.path,
+      currentBranch: "master",
+      targetBranch: "master",
+      isCloned: true,
+      scope: .dependency
+    )
+    let viewModel = TagManagementViewModel()
+    viewModel.repositories = [workspace, dependency]
+    viewModel.selectedRepositoryIDs = [workspace.id, dependency.id]
+    viewModel.createAndPushTag(
+      name: "v1.0.0",
+      message: "Batch release",
+      repositoryIDs: viewModel.selectedRepositoryIDs
+    )
+
+    let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    XCTAssertFalse(viewModel.isBusy, "Tag 批处理应在 20 秒内结束")
+    XCTAssertEqual(viewModel.operationResults.map(\.status), [.success, .pushFailed])
+    XCTAssertEqual(viewModel.operationResults.map(\.repositoryName), ["Workspace", "Dependency"])
+    XCTAssertTrue(try ReposYAMLService().loadTags(at: repositoryWithoutOrigin.path).tags.contains { $0.name == "v1.0.0" })
+  }
+
   func testTagManagementRejectsInvalidTagName() throws {
     let repository = temporaryDirectory.appending(path: "invalid-tag-repository", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)

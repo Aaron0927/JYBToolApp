@@ -126,10 +126,9 @@
     .copy-pair + .copy-pair { margin-top: 9px; }
     .copy-pair-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
     .deprecated { display: inline-flex; align-items: center; margin-left: auto; padding: 2px 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--secondary); font-size: 10px; }
-    .tag-operation-meta { display: grid; gap: 3px; min-width: 0; }
-    .tag-operation-meta .mono { color: var(--tertiary); font-size: 11px; }
-    .tag-action-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
-    .tag-add-form { display: grid; gap: 12px; margin-top: 14px; padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); }
+    .tag-operation-fields { display: grid; gap: 12px; }
+    .tag-checkbox { display: grid; place-items: center; width: 19px; height: 19px; flex: 0 0 auto; border: 1px solid var(--line-strong); border-radius: 4px; color: white; font-size: 13px; }
+    .tag-repo-card.selected .tag-checkbox { border-color: var(--accent); background: var(--accent); }
     .tag-repo-list { display: grid; gap: 9px; }
     .tag-repo-group-title { margin: 0 0 7px; color: var(--tertiary); font-size: 11px; font-weight: 650; }
     .tag-repo-group + .tag-repo-group { margin-top: 14px; }
@@ -247,7 +246,7 @@
     const state = {
       page: "public", mode: "success", loaded: { broker: false, submodules: false, public: false, pull: false },
       busy: false, tagBusyMessage: "", logs: [], activeLevels: new Set(["info", "success", "warning", "error"]),
-      outcomes: {}, errors: {}, copyPairs: 1, copyResult: null, selectedTagRepo: demoRepos[0].name, isAddingTag: false, pendingTagPush: null, selectedPullRepos: new Set()
+      outcomes: {}, errors: {}, copyPairs: 1, copyResult: null, selectedTagRepos: new Set(), tagName: "", tagMessage: "", tagResults: [], tagSummary: "", selectedPullRepos: new Set()
     };
     const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
     const pageRoot = document.getElementById("page");
@@ -317,14 +316,21 @@
         `<section class="panel"><div class="panel-head"><div><h2>选择仓库</h2><p>逐仓选择本次需要拉取最新内容的仓库</p></div>${loaded ? `<span class="chip">${updateRepos.length} 个仓库</span>` : ""}</div><div class="panel-body">${loaded ? `<div class="toolbar"><span class="hint">已选择 ${selectedCount} 个仓库</span><button data-action="pull-toggle-all">${allSelected ? "取消全选" : "全选"}</button></div><div class="list">${rows}</div>` : empty("尚未读取仓库", "读取后显示主仓库和 repos.yml 中的全部依赖仓库。")}${state.outcomes.pull ? resultSummary(state.outcomes.pull) : ""}${state.busy && state.page === "pull" ? progress("正在拉取所选仓库的最新内容…") : ""}<div class="footer-actions"><span class="hint">只更新勾选的仓库，并且不切换分支。</span><button class="primary" data-action="pull-latest" ${loaded && selectedCount > 0 && !state.busy ? "" : "disabled"}>更新所选仓库（${selectedCount}）</button></div></div></section>`;
     }
     function renderTags() {
-      const repo = demoRepos.find(item => item.name === state.selectedTagRepo) || demoRepos[0];
+      const selectedCount = state.selectedTagRepos.size;
+      const allSelected = selectedCount === demoRepos.length;
       const repoCard = item => {
-        const isSelected = item.name === state.selectedTagRepo;
-        return `<div class="tag-repo-card ${isSelected ? "selected" : ""}"><button class="tag-repo-head" data-action="select-tag-repo" data-repo="${escapeHTML(item.name)}" aria-pressed="${isSelected}" ${state.busy ? "disabled" : ""}><span class="tag-repo-meta"><b>${escapeHTML(item.name)}</b><small class="mono">${escapeHTML(item.path)}</small></span><span class="tag-repo-status">${item.cloned === false ? "未克隆" : `分支 ${escapeHTML(item.current)}`}</span></button></div>`;
+        const isSelected = state.selectedTagRepos.has(item.name);
+        return `<div class="tag-repo-card ${isSelected ? "selected" : ""}"><button class="tag-repo-head" data-action="toggle-tag-repo" data-repo="${escapeHTML(item.name)}" aria-pressed="${isSelected}" ${state.busy ? "disabled" : ""}><span class="tag-checkbox" aria-hidden="true">${isSelected ? "✓" : ""}</span><span class="tag-repo-meta"><b>${escapeHTML(item.name)}</b><small class="mono">${escapeHTML(item.path)}</small></span><span class="tag-repo-status">${item.cloned === false ? "未克隆" : `分支 ${escapeHTML(item.current)}`}</span></button></div>`;
       };
-      pageRoot.innerHTML = heading("公版", names.tags, "#", "选择仓库后设置并推送 Tag，并清楚反馈执行结果。") +
-        `<section class="panel" aria-label="Tag 操作区"><div class="panel-head"><div><h2>设置并推送 Tag</h2><p>为当前选中仓库的 HEAD 创建 annotated Tag 并推送到 origin。</p></div></div><div class="panel-body"><div class="tag-operation-meta"><b>${escapeHTML(repo.name)}</b><span class="mono">${escapeHTML(repo.path)}</span></div><div class="tag-action-toolbar"><button class="primary" data-action="toggle-tag-form" ${repo.cloned && !state.busy ? "" : "disabled"}>${state.isAddingTag ? "收起设置" : "设置并推送 Tag"}</button></div>${state.isAddingTag ? `<div class="tag-add-form"><div class="grid-two"><div class="field"><label for="new-tag-name">Tag 名称</label><input id="new-tag-name" class="mono" placeholder="例如 v8.4.21" ${repo.cloned && !state.busy ? "" : "disabled"}></div><div class="field"><label for="new-tag-message">附注说明</label><input id="new-tag-message" placeholder="填写版本说明" ${repo.cloned && !state.busy ? "" : "disabled"}></div></div><div class="footer-actions"><span class="hint">确认后会在当前 HEAD 创建 Tag，并推送到 origin。</span><button class="primary" data-action="set-and-push-tag" ${repo.cloned && !state.busy ? "" : "disabled"}>设置并推送</button></div></div>` : ""}${state.busy && state.page === "tags" ? progress(state.tagBusyMessage || "正在处理 Tag…") : ""}${!repo.cloned ? `<div class="callout warning">该仓库尚未克隆，无法设置或推送 Tag。</div>` : ""}${state.errors.tags ? `<div class="error-box" role="alert">${escapeHTML(state.errors.tags)}</div>` : ""}${state.pendingTagPush?.repo === repo.name ? `<div class="callout warning">Tag「${escapeHTML(state.pendingTagPush.name)}」已在本地创建，但尚未推送。<button data-action="retry-tag-push" ${state.busy ? "disabled" : ""}>重试推送到 origin</button></div>` : ""}</div></section>` +
-        `<section class="panel" aria-label="仓库列表"><div class="panel-head"><div><h2>仓库列表</h2><p>选择主仓库或依赖仓库作为本次 Tag 操作目标。</p></div><span class="chip">${demoRepos.length} 个仓库</span></div><div class="panel-body"><div class="tag-repo-group"><h3 class="tag-repo-group-title">主仓库</h3><div class="tag-repo-list">${repoCard(demoRepos[0])}</div></div><div class="tag-repo-group"><h3 class="tag-repo-group-title">依赖仓库</h3><div class="tag-repo-list">${demoRepos.slice(1).map(repoCard).join("")}</div></div></div></section>`;
+      const resultRows = state.tagResults.map(result => {
+        const statusLabel = result.status === "success" ? "成功" : result.status === "push-failed" ? "待重试推送" : "失败";
+        const statusClassName = result.status === "success" ? "success" : result.status === "push-failed" ? "warning" : "failure";
+        const retry = result.status === "push-failed" ? `<button data-action="retry-tag-push" data-repo="${escapeHTML(result.repo)}" data-tag="${escapeHTML(result.name)}" ${state.busy ? "disabled" : ""}>重试推送</button>` : "";
+        return `<article class="repo-row"><div class="repo-top"><span class="repo-name">${escapeHTML(result.repo)}</span><span class="status ${statusClassName}">${statusLabel}</span></div><div class="target-line">${escapeHTML(result.message)}</div>${retry ? `<div class="footer-actions">${retry}</div>` : ""}</article>`;
+      }).join("");
+      pageRoot.innerHTML = heading("公版", names.tags, "#", "选择一个或多个仓库，对同一 Tag 进行统一设置和推送。") +
+        `<section class="panel" aria-label="Tag 操作区"><div class="panel-head"><div><h2>Tag 操作</h2><p>将在每个所选仓库当前 HEAD 创建 annotated Tag 并推送到 origin。</p></div></div><div class="panel-body"><div class="tag-operation-fields"><div class="field"><label for="new-tag-name">Tag 名称</label><input id="new-tag-name" class="mono" value="${escapeHTML(state.tagName)}" placeholder="例如 v8.4.21" ${state.busy ? "disabled" : ""}></div><div class="field"><label for="new-tag-message">附注说明</label><input id="new-tag-message" value="${escapeHTML(state.tagMessage)}" placeholder="填写版本说明" ${state.busy ? "disabled" : ""}></div></div><div class="footer-actions"><span class="hint">已选择 ${selectedCount} 个仓库；统一使用相同名称和附注。</span><button class="primary" data-action="set-and-push-tag" ${selectedCount && !state.busy ? "" : "disabled"}>设置并推送到所选仓库</button></div>${state.busy && state.page === "tags" ? progress(state.tagBusyMessage || "正在处理所选仓库…") : ""}${state.tagSummary ? `<div class="callout">${escapeHTML(state.tagSummary)}</div>` : ""}${state.errors.tags ? `<div class="error-box" role="alert">${escapeHTML(state.errors.tags)}</div>` : ""}${resultRows ? `<div class="separator"></div><h3>逐仓执行结果</h3><div class="list">${resultRows}</div>` : ""}</div></section>` +
+        `<section class="panel" aria-label="仓库选择区"><div class="panel-head"><div><h2>仓库选择</h2><p>多选主仓库或依赖仓库；未克隆仓库会单独报告失败。</p></div><span class="chip">${demoRepos.length} 个仓库</span></div><div class="panel-body"><div class="toolbar"><span class="hint">已选择 ${selectedCount} / ${demoRepos.length} 个仓库</span><button data-action="tag-toggle-all" ${state.busy ? "disabled" : ""}>${allSelected ? "取消全选" : "全选"}</button></div><div class="tag-repo-group"><h3 class="tag-repo-group-title">主仓库</h3><div class="tag-repo-list">${repoCard(demoRepos[0])}</div></div><div class="tag-repo-group"><h3 class="tag-repo-group-title">依赖仓库</h3><div class="tag-repo-list">${demoRepos.slice(1).map(repoCard).join("")}</div></div></div></section>`;
     }
     function renderCopy() {
       const pairs = Array.from({ length: state.copyPairs }, (_, index) => `<div class="copy-pair"><div class="copy-pair-head"><b>路径对 ${index + 1}</b><button class="quiet" data-action="remove-pair" data-index="${index}" ${state.copyPairs === 1 ? "disabled" : ""}>移除</button></div><div class="grid-two"><div class="field"><label for="source-${index}">源项目目录</label><div class="inline-field"><input id="source-${index}" class="path-input mono" readonly value="${index === 0 ? "/workspace/TradeBook_Public" : ""}" placeholder="选择源项目目录"><button data-action="browse-source" data-index="${index}">浏览</button></div></div><div class="field"><label for="target-${index}">目标项目目录</label><div class="inline-field"><input id="target-${index}" class="path-input mono" readonly value="${index === 0 ? "/workspace/TradeBook_Test" : ""}" placeholder="选择目标项目目录"><button data-action="browse-target" data-index="${index}">浏览</button></div></div></div></div>`).join("");
@@ -361,35 +367,69 @@
       dialog.querySelector("[data-dialog-cancel]").onclick = () => dialog.close();
       dialog.querySelector("[data-dialog-confirm]").onclick = () => { dialog.close(); action(); };
     }
-    function runTagAction(action, tagName, message = "") {
+    function runTagBatch(tagName, message, repositories) {
       if (state.busy) return;
       state.busy = true;
-      state.tagBusyMessage = `${action} Tag ${tagName}…`;
+      state.tagSummary = "";
+      state.tagResults = [];
       state.errors.tags = null;
-      addLog("info", `${state.selectedTagRepo} · ${action} Tag ${tagName}（模拟）`);
-      renderPage();
-      window.setTimeout(() => {
-        state.busy = false;
-        state.tagBusyMessage = "";
-        if (state.mode === "failure") {
-          if (action === "设置并推送") {
-            state.pendingTagPush = { repo: state.selectedTagRepo, name: tagName };
-            state.errors.tags = `Tag ${tagName} 已在本地创建，但推送到 origin 失败：演示远端不可用。`;
-          } else {
-            state.errors.tags = `${action} Tag ${tagName} 失败：演示远端或仓库操作不可用。`;
-          }
-          addLog("error", state.errors.tags);
+      let index = 0;
+      const processNext = () => {
+        if (index >= repositories.length) {
+          state.busy = false;
+          state.tagBusyMessage = "";
+          const succeeded = state.tagResults.filter(result => result.status === "success").length;
+          const pushFailed = state.tagResults.filter(result => result.status === "push-failed").length;
+          const failed = state.tagResults.filter(result => result.status === "failed").length;
+          state.tagSummary = `处理完成：成功 ${succeeded}，待重试推送 ${pushFailed}，失败 ${failed}。`;
+          if (succeeded || pushFailed) { state.tagName = ""; state.tagMessage = ""; }
+          addLog(failed || pushFailed ? "warning" : "success", `Tag ${tagName} 批量处理结束：${state.tagSummary}`);
           renderPage();
-          showToast(`${action}失败`);
+          showToast("Tag 批量处理完成（模拟）");
           return;
         }
-        if (action === "设置并推送") {
-          state.isAddingTag = false;
-        }
-        if (action === "重试推送" && state.pendingTagPush?.repo === state.selectedTagRepo) state.pendingTagPush = null;
-        addLog("success", `${state.selectedTagRepo} · ${action} Tag ${tagName} 完成`);
+        const repo = repositories[index];
+        state.tagBusyMessage = `正在处理 ${repo.name}（${index + 1}/${repositories.length}）…`;
+        addLog("info", `${repo.name} · 开始设置并推送 Tag ${tagName}（模拟）`);
         renderPage();
-        showToast(`${action}已完成（模拟）`);
+        window.setTimeout(() => {
+          let result;
+          if (!repo.cloned) {
+            result = { repo: repo.name, name: tagName, status: "failed", message: "仓库尚未克隆。" };
+          } else if (state.mode === "failure" || (state.mode === "partial" && index === repositories.length - 1)) {
+            result = { repo: repo.name, name: tagName, status: "push-failed", message: `Tag 已在本地创建，但推送到 origin 失败：演示远端不可用。` };
+          } else {
+            result = { repo: repo.name, name: tagName, status: "success", message: "已在当前 HEAD 创建并推送到 origin。" };
+          }
+          state.tagResults.push(result);
+          addLog(result.status === "success" ? "success" : result.status === "push-failed" ? "warning" : "error", `${repo.name} · ${result.message}`);
+          index += 1;
+          processNext();
+        }, 450);
+      };
+      processNext();
+    }
+    function retryTagPush(repoName, tagName) {
+      if (state.busy) return;
+      state.busy = true;
+      state.errors.tags = null;
+      state.tagBusyMessage = `正在重试推送 ${tagName} 到 ${repoName}…`;
+      addLog("info", `${repoName} · 重试推送 Tag ${tagName}（模拟）`);
+      renderPage();
+      window.setTimeout(() => {
+        const index = state.tagResults.findIndex(result => result.repo === repoName && result.name === tagName);
+        if (index >= 0) {
+          state.tagResults[index] = state.mode === "failure"
+            ? { ...state.tagResults[index], message: "本地 Tag 已保留，推送重试仍失败：演示远端不可用。" }
+            : { ...state.tagResults[index], status: "success", message: "推送重试成功。" };
+        }
+        state.busy = false;
+        state.tagBusyMessage = "";
+        const success = state.tagResults[index]?.status === "success";
+        state.tagSummary = success ? `${repoName} 的 Tag ${tagName} 已推送。` : `${repoName} 的 Tag ${tagName} 仍待重试推送。`;
+        addLog(success ? "success" : "warning", `${repoName} · ${state.tagSummary}`);
+        renderPage();
+        showToast(success ? "推送重试成功（模拟）" : "推送重试失败（模拟）");
       }, 600);
     }
     function simulateBatch(key, repos, actionLabel) {
@@ -504,27 +544,31 @@
         const selected = updateRepos.filter(repo => state.selectedPullRepos.has(repo.path));
         confirmAction("确认更新所选仓库？", `将更新 ${selected.length} 个仓库的当前分支；未选择的仓库保持不变。`, "开始更新", () => simulateBatch("pull", selected, "公版仓库更新"), false);
       }
-      if (action === "select-tag-repo") {
-        state.selectedTagRepo = button.dataset.repo;
-        state.isAddingTag = false;
+      if (action === "toggle-tag-repo") {
+        const repoName = button.dataset.repo;
+        state.selectedTagRepos.has(repoName) ? state.selectedTagRepos.delete(repoName) : state.selectedTagRepos.add(repoName);
+        state.tagSummary = "";
         state.errors.tags = null;
         renderPage();
       }
-      if (action === "toggle-tag-form") {
-        state.isAddingTag = !state.isAddingTag;
+      if (action === "tag-toggle-all") {
+        if (state.selectedTagRepos.size === demoRepos.length) state.selectedTagRepos.clear();
+        else state.selectedTagRepos = new Set(demoRepos.map(repo => repo.name));
         renderPage();
       }
       if (action === "set-and-push-tag") {
-        const tagName = document.getElementById("new-tag-name")?.value.trim() || "";
-        const message = document.getElementById("new-tag-message")?.value.trim() || "";
+        const tagName = state.tagName.trim();
+        const message = state.tagMessage.trim();
+        const selectedRepos = demoRepos.filter(repo => state.selectedTagRepos.has(repo.name));
+        if (!selectedRepos.length) { showToast("请至少选择一个仓库"); return; }
         if (!tagName || !message || /\s/.test(tagName) || tagName.includes("..") || tagName.startsWith("/") || tagName.endsWith("/")) { showToast("请填写有效的 Tag 名称和附注"); return; }
-        confirmAction("确认设置并推送 Tag？", `将在 ${state.selectedTagRepo} 当前 HEAD 创建 annotated Tag ${tagName}，并推送到 origin。附注：${message}`, "设置并推送", () => runTagAction("设置并推送", tagName, message), false);
+        const repoNames = selectedRepos.map(repo => repo.name).join("、");
+        confirmAction("确认统一设置并推送 Tag？", `将在 ${selectedRepos.length} 个仓库的当前 HEAD 创建并推送同一个 annotated Tag ${tagName}。仓库：${repoNames}。附注：${message}`, "设置并推送", () => runTagBatch(tagName, message, selectedRepos), false);
       }
       if (action === "retry-tag-push") {
-        const pending = state.pendingTagPush;
-        if (pending?.repo === state.selectedTagRepo) {
-          confirmAction("确认重试推送 Tag？", `将把本地 Tag ${pending.name} 推送到 origin。`, "推送到 origin", () => runTagAction("重试推送", pending.name), false);
-        }
+        const repoName = button.dataset.repo;
+        const tagName = button.dataset.tag;
+        confirmAction("确认重试推送 Tag？", `将把仓库 ${repoName} 中本地已创建的 Tag ${tagName} 推送到 origin。`, "推送到 origin", () => retryTagPush(repoName, tagName), false);
       }
       if (action === "add-pair") { state.copyPairs += 1; renderPage(); }
       if (action === "remove-pair") { if (state.copyPairs > 1) state.copyPairs -= 1; renderPage(); }
@@ -550,6 +594,10 @@
     document.getElementById("outcome-mode").addEventListener("change", event => {
       state.mode = event.target.value;
       addLog("info", `演示结果模式：${event.target.selectedOptions[0].textContent}`);
+    });
+    document.addEventListener("input", event => {
+      if (event.target.id === "new-tag-name") state.tagName = event.target.value;
+      if (event.target.id === "new-tag-message") state.tagMessage = event.target.value;
     });
     document.addEventListener("change", event => {
       if (event.target.matches("[data-pull-repo]")) {

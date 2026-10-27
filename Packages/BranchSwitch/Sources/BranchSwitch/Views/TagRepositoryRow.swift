@@ -3,17 +3,12 @@ import ToolUI
 
 struct TagRepositoryRow: View {
   let repository: RepoSwitchInfo
-  let isSelected: Bool
+  @Binding var isSelected: Bool
   let isDisabled: Bool
-  let onSelect: () -> Void
 
   var body: some View {
-    Button(action: onSelect) {
+    Toggle(isOn: $isSelected) {
       HStack(spacing: 12) {
-        Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-          .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-          .accessibilityHidden(true)
-
         VStack(alignment: .leading, spacing: 4) {
           Text(repository.name)
             .font(.headline)
@@ -37,12 +32,12 @@ struct TagRepositoryRow: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .contentShape(.rect)
-      .padding(12)
-      .background(isSelected ? Color.accentColor.opacity(0.08) : Color.clear, in: .rect(cornerRadius: 9))
     }
-    .buttonStyle(.plain)
+    .toggleStyle(.checkbox)
+    .padding(12)
+    .background(isSelected ? Color.accentColor.opacity(0.08) : Color.clear, in: .rect(cornerRadius: 9))
     .disabled(isDisabled)
-    .accessibilityLabel("\(repository.name)，\(repository.isCloned ? "已克隆" : "未克隆")")
-    .accessibilityAddTraits(isSelected ? .isSelected : [])
+    .accessibilityLabel("选择仓库 \(repository.name)")
+    .accessibilityValue(isSelected ? "已选择" : "未选择")
   }
 }

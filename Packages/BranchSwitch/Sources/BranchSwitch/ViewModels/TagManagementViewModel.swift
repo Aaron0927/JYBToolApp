@@ -9,15 +9,15 @@ public final class TagManagementViewModel {
 
   public var projectPath = ""
   public var repositories: [RepoSwitchInfo] = []
-  public var selectedRepositoryID = ""
+  public var selectedRepositoryIDs: Set<String> = []
   public var tagName = ""
   public var tagMessage = ""
   public var isLoading = false
   public var isWorking = false
   public var errorMessage: String?
   public var statusMessage: String?
-  public private(set) var pendingPushTagName: String?
-  public private(set) var pendingPushRepositoryID: String?
+  public var operationProgress: String?
+  public private(set) var operationResults: [TagRepositoryOperationResult] = []
 
   private var currentTask: Task<Void, Never>?
 
@@ -25,16 +25,22 @@ public final class TagManagementViewModel {
     isLoading || isWorking
   }
 
+  public var selectedRepositories: [RepoSwitchInfo] {
+    repositories.filter { selectedRepositoryIDs.contains($0.id) }
+  }
+
+  public var areAllRepositoriesSelected: Bool {
+    !repositories.isEmpty && selectedRepositoryIDs.count == repositories.count
+  }
+
+  public var canCreateAndPushTag: Bool {
+    !selectedRepositories.isEmpty &&
+      !tagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+      !tagMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
   public init() {
     projectPath = UserDefaults.standard.string(forKey: Self.lastProjectPathKey) ?? ""
-  }
-
-  public var selectedRepository: RepoSwitchInfo? {
-    repositories.first { $0.id == selectedRepositoryID }
-  }
-
-  public var canRetryPendingPush: Bool {
-    pendingPushTagName != nil && pendingPushRepositoryID == selectedRepositoryID
   }
 
   public func selectProject() {
@@ -59,22 +65,20 @@ public final class TagManagementViewModel {
     isLoading = true
     errorMessage = nil
     statusMessage = nil
+    operationProgress = nil
+    operationResults = []
     repositories = []
-    selectedRepositoryID = ""
-    pendingPushTagName = nil
-    pendingPushRepositoryID = nil
+    selectedRepositoryIDs = []
     UserDefaults.standard.set(projectPath, forKey: Self.lastProjectPathKey)
 
     let path = projectPath
     currentTask = Task { @MainActor [weak self] in
       let result = await Task.detached(priority: .userInitiated) { () -> RepositoryLoadResult in
         do {
-          let loaded = try ReposYAMLService().loadRepoInfos(atProjectPath: path)
-          let branch = ReposYAMLService().getCurrentBranch(at: loaded.rootPath) ?? ""
-          let workspace = ReposYAMLService().makeWorkspaceRepoInfo(
-            rootPath: loaded.rootPath,
-            targetBranch: branch
-          )
+          let service = ReposYAMLService()
+          let loaded = try service.loadRepoInfos(atProjectPath: path)
+          let branch = service.getCurrentBranch(at: loaded.rootPath) ?? ""
+          let workspace = service.makeWorkspaceRepoInfo(rootPath: loaded.rootPath, targetBranch: branch)
           return RepositoryLoadResult(repositories: [workspace] + loaded.infos, error: nil)
         } catch {
           return RepositoryLoadResult(repositories: [], error: error.localizedDescription)
@@ -86,33 +90,35 @@ public final class TagManagementViewModel {
       self.currentTask = nil
       self.repositories = result.repositories
       self.errorMessage = result.error
-      self.selectedRepositoryID = (result.repositories.first(where: \.isCloned) ?? result.repositories.first)?.id ?? ""
     }
   }
 
-  public func selectRepository(_ repositoryID: String) {
-    guard selectedRepositoryID != repositoryID else { return }
-    selectedRepositoryID = repositoryID
+  public func setRepository(_ repositoryID: String, selected: Bool) {
+    guard !isBusy else { return }
+    if selected {
+      selectedRepositoryIDs.insert(repositoryID)
+    } else {
+      selectedRepositoryIDs.remove(repositoryID)
+    }
     errorMessage = nil
-    statusMessage = nil
   }
 
-  public func createAndPushTag(name: String, message: String) {
-    perform(.createAndPush(
-      name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-      message: message.trimmingCharacters(in: .whitespacesAndNewlines)
-    ))
+  public func setAllRepositoriesSelected(_ selected: Bool) {
+    guard !isBusy else { return }
+    selectedRepositoryIDs = selected ? Set(repositories.map(\.id)) : []
+    errorMessage = nil
   }
 
-  public func retryPendingTagPush() {
-    guard canRetryPendingPush, let pendingPushTagName else { return }
-    perform(.push(name: pendingPushTagName))
-  }
-
-  private func perform(_ operation: TagOperation) {
-    guard let repository = selectedRepository else { return }
-    guard repository.isCloned else {
-      errorMessage = "所选仓库尚未克隆，无法设置或推送 Tag。"
+  public func createAndPushTag(name: String, message: String, repositoryIDs: Set<String>) {
+    let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let message = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    let targets = repositories.filter { repositoryIDs.contains($0.id) }
+    guard !targets.isEmpty else {
+      errorMessage = "请至少选择一个仓库。"
+      return
+    }
+    guard !name.isEmpty, !message.isEmpty else {
+      errorMessage = "Tag 名称和附注说明不能为空。"
       return
     }
 
@@ -120,82 +126,153 @@ public final class TagManagementViewModel {
     isWorking = true
     errorMessage = nil
     statusMessage = nil
-    let path = repository.absolutePath
-    LogManager.shared.info("\(repository.name) · \(operation.startMessage)")
+    operationResults = []
 
     currentTask = Task { @MainActor [weak self] in
-      let result = await Task.detached(priority: .userInitiated) { () -> TagActionResult in
-        let service = ReposYAMLService()
-        do {
-          switch operation {
-          case .createAndPush(let name, let message):
-            try service.createAndPushTag(name, message: message, at: path)
-          case .push(let name):
-            try service.pushTag(name, at: path)
-          }
-          return TagActionResult(error: nil, createdLocalTag: nil)
-        } catch let error as ReposYAMLServiceError {
-          if case .tagPushFailed(let name, _) = error {
-            return TagActionResult(error: error.localizedDescription, createdLocalTag: name)
-          }
-          return TagActionResult(error: error.localizedDescription, createdLocalTag: nil)
-        } catch {
-          return TagActionResult(error: error.localizedDescription, createdLocalTag: nil)
-        }
-      }.value
-
       guard let self else { return }
+      for (index, repository) in targets.enumerated() {
+        self.operationProgress = "正在处理 \(repository.name)（\(index + 1)/\(targets.count)）…"
+        let result = await Self.createAndPushTag(name, message: message, in: repository)
+        self.operationResults.append(result)
+        Self.log(result)
+      }
+
       self.isWorking = false
       self.currentTask = nil
-      if let createdLocalTag = result.createdLocalTag {
-        self.pendingPushTagName = createdLocalTag
-        self.pendingPushRepositoryID = repository.id
+      self.operationProgress = nil
+      if self.operationResults.contains(where: { $0.status != .failed }) {
+        self.tagName = ""
+        self.tagMessage = ""
       }
-      if result.error == nil {
-        self.statusMessage = operation.successMessage
-        LogManager.shared.success("\(repository.name) · \(operation.successMessage)")
-        if case .createAndPush = operation {
-          self.tagName = ""
-          self.tagMessage = ""
-        } else {
-          self.pendingPushTagName = nil
-          self.pendingPushRepositoryID = nil
-        }
-      } else {
-        self.errorMessage = result.error
-        if let error = result.error {
-          LogManager.shared.error("\(repository.name) · \(error)")
-        }
-      }
+      self.statusMessage = Self.summary(for: self.operationResults)
+      LogManager.shared.info("Tag 批量处理完成：\(self.statusMessage ?? "")")
     }
   }
 
-  private enum TagOperation: Sendable {
-    case createAndPush(name: String, message: String)
-    case push(name: String)
+  public func retryTagPush(for repositoryID: String) {
+    guard !isBusy,
+          let resultIndex = operationResults.firstIndex(where: {
+            $0.repositoryID == repositoryID && $0.status == .pushFailed
+          }),
+          let repository = repositories.first(where: { $0.id == repositoryID })
+    else { return }
 
-    var startMessage: String {
-      switch self {
-      case .createAndPush(let name, _): "开始设置并推送 Tag \(name)"
-      case .push(let name): "开始重试推送 Tag \(name)"
+    let failedResult = operationResults[resultIndex]
+    isWorking = true
+    errorMessage = nil
+    statusMessage = nil
+    operationProgress = "正在重试推送 \(failedResult.tagName) 到 \(repository.name)…"
+    LogManager.shared.info("\(repository.name) · 开始重试推送 Tag \(failedResult.tagName)")
+
+    currentTask = Task { @MainActor [weak self] in
+      let result = await Self.retryTagPush(failedResult.tagName, in: repository)
+      guard let self else { return }
+      if let resultIndex = self.operationResults.firstIndex(where: { $0.repositoryID == repositoryID }) {
+        self.operationResults[resultIndex] = result
       }
+      self.isWorking = false
+      self.currentTask = nil
+      self.operationProgress = nil
+      self.statusMessage = result.message
+      Self.log(result)
+    }
+  }
+
+  private static func createAndPushTag(
+    _ name: String,
+    message: String,
+    in repository: RepoSwitchInfo
+  ) async -> TagRepositoryOperationResult {
+    guard repository.isCloned else {
+      return TagRepositoryOperationResult(
+        repositoryID: repository.id,
+        repositoryName: repository.name,
+        tagName: name,
+        status: .failed,
+        message: "仓库尚未克隆。"
+      )
     }
 
-    var successMessage: String {
-      switch self {
-      case .createAndPush(let name, _): "已设置并推送 Tag \(name)"
-      case .push(let name): "已推送 Tag \(name)"
+    return await Task.detached(priority: .userInitiated) {
+      do {
+        try ReposYAMLService().createAndPushTag(name, message: message, at: repository.absolutePath)
+        return TagRepositoryOperationResult(
+          repositoryID: repository.id,
+          repositoryName: repository.name,
+          tagName: name,
+          status: .success,
+          message: "已在当前 HEAD 创建并推送到 origin。"
+        )
+      } catch let error as ReposYAMLServiceError {
+        let status: TagRepositoryOperationStatus
+        if case .tagPushFailed = error {
+          status = .pushFailed
+        } else {
+          status = .failed
+        }
+        return TagRepositoryOperationResult(
+          repositoryID: repository.id,
+          repositoryName: repository.name,
+          tagName: name,
+          status: status,
+          message: error.localizedDescription
+        )
+      } catch {
+        return TagRepositoryOperationResult(
+          repositoryID: repository.id,
+          repositoryName: repository.name,
+          tagName: name,
+          status: .failed,
+          message: error.localizedDescription
+        )
       }
+    }.value
+  }
+
+  private static func retryTagPush(_ name: String, in repository: RepoSwitchInfo) async -> TagRepositoryOperationResult {
+    await Task.detached(priority: .userInitiated) {
+      do {
+        try ReposYAMLService().pushTag(name, at: repository.absolutePath)
+        return TagRepositoryOperationResult(
+          repositoryID: repository.id,
+          repositoryName: repository.name,
+          tagName: name,
+          status: .success,
+          message: "已推送到 origin。"
+        )
+      } catch {
+        return TagRepositoryOperationResult(
+          repositoryID: repository.id,
+          repositoryName: repository.name,
+          tagName: name,
+          status: .pushFailed,
+          message: "本地 Tag 已保留，推送重试失败：\(error.localizedDescription)"
+        )
+      }
+    }.value
+  }
+
+  private static func log(_ result: TagRepositoryOperationResult) {
+    let message = "\(result.repositoryName) · Tag \(result.tagName)：\(result.message)"
+    switch result.status {
+    case .success:
+      LogManager.shared.success(message)
+    case .pushFailed:
+      LogManager.shared.warning(message)
+    case .failed:
+      LogManager.shared.error(message)
     }
+  }
+
+  private static func summary(for results: [TagRepositoryOperationResult]) -> String {
+    let succeeded = results.filter { $0.status == .success }.count
+    let pushFailed = results.filter { $0.status == .pushFailed }.count
+    let failed = results.filter { $0.status == .failed }.count
+    return "处理完成：成功 \(succeeded)，待重试推送 \(pushFailed)，失败 \(failed)。"
   }
 
   private struct RepositoryLoadResult: Sendable {
     let repositories: [RepoSwitchInfo]
     let error: String?
-  }
-
-  private struct TagActionResult: Sendable {
-    let error: String?
-    let createdLocalTag: String?
   }
 }
