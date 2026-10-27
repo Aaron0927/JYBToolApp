@@ -1,12 +1,10 @@
-//
-//  ReposSwitchView.swift
-//  BranchSwitch
-//
-
 import SwiftUI
+import ToolUI
 
 public struct ReposSwitchView: View {
   @Bindable var viewModel: ReposSwitchViewModel
+  @State private var isConfirmingSwitch = false
+  @State private var isConfirmingPull = false
 
   public init(viewModel: ReposSwitchViewModel) {
     self.viewModel = viewModel
@@ -14,268 +12,242 @@ public struct ReposSwitchView: View {
 
   public var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      header
-      projectPicker
-      branchPicker
-      configSummary
-      Divider()
-      reposList
-      Spacer()
-    }
-    .padding(.vertical)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-  }
+      ToolPageHeader(
+        title: "公版依赖仓库",
+        subtitle: "读取主工程的 repos.yml，按仓库配置切换分支或 Tag，也可以批量拉取最新代码。",
+        systemImage: "shippingbox"
+      )
 
-  private var header: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        Image(systemName: "list.bullet.rectangle")
-          .font(.title)
-          .foregroundStyle(.green)
-        Text("公版依赖仓库切换")
-          .font(.title2)
-          .bold()
-        Spacer()
+      ToolPanel("主工程", systemImage: "folder") {
+        HStack {
+          TextField("请选择主工程目录", text: $viewModel.projectPath)
+            .disabled(true)
+            .accessibilityLabel("主工程路径")
+
+          Button("浏览…", systemImage: "folder") {
+            viewModel.selectProject()
+          }
+          .disabled(viewModel.isBusy)
+
+          Button("刷新分支", systemImage: "arrow.clockwise") {
+            viewModel.loadBranches()
+          }
+          .disabled(viewModel.projectPath.isEmpty || viewModel.isBusy)
+
+          Button("在 Xcode 中打开", systemImage: "hammer") {
+            viewModel.openInXcode()
+          }
+          .disabled(!viewModel.hasWorkspace || viewModel.isBusy)
+        }
+
+        if !viewModel.localBranches.isEmpty {
+          HStack {
+            Picker("主工程分支", selection: $viewModel.selectedBranch) {
+              ForEach(viewModel.localBranches, id: \.self) { branch in
+                Text(branch).tag(branch)
+              }
+            }
+            .pickerStyle(.menu)
+            .onChange(of: viewModel.selectedBranch) { _, _ in
+              viewModel.branchSelectionChanged()
+            }
+
+            if !viewModel.currentBranch.isEmpty {
+              ToolStatusBadge("当前：\(viewModel.currentBranch)")
+            }
+
+            Spacer()
+
+            Button("读取 repos.yml", systemImage: "doc.text.magnifyingglass") {
+              viewModel.loadData()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(viewModel.selectedBranch.isEmpty || viewModel.isBusy)
+          }
+        }
+
+        if viewModel.isBusy {
+          ProgressView(progressLabel)
+            .controlSize(.small)
+        }
       }
 
-      Text("切换父工作区，并读取 fastlane/repos.yml 同步各依赖仓库")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
+      if !viewModel.configPath.isEmpty {
+        ToolPanel("配置来源", systemImage: "doc.text") {
+          ToolValueRow("配置文件", value: viewModel.configPath)
+          if !viewModel.rootPath.isEmpty {
+            ToolValueRow("仓库根目录", value: viewModel.rootPath)
+          }
+          if let pullSummary = viewModel.pullSummary {
+            ToolValueRow("最近拉取", value: pullSummary)
+          }
+          if let operationSummary = viewModel.operationSummary {
+            ToolValueRow("最近操作", value: operationSummary)
+          }
+        }
+      }
+
+      if viewModel.repos.isEmpty {
+        ContentUnavailableView(
+          viewModel.projectPath.isEmpty ? "请选择主工程" : "尚未读取仓库配置",
+          systemImage: viewModel.projectPath.isEmpty ? "folder.badge.questionmark" : "shippingbox",
+          description: Text("选择主工程目录、读取本地分支，再加载对应分支中的 repos.yml。")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        ToolPanel("仓库切换预览", systemImage: "arrow.triangle.branch") {
+          HStack {
+            Text("\(viewModel.repos.count) 个仓库 · 目标来自 repos.yml")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+            Spacer()
+            Button("拉取全部最新代码", systemImage: "arrow.down.to.line.compact") {
+              isConfirmingPull = true
+            }
+            .disabled(viewModel.isBusy || viewModel.projectPath.isEmpty)
+
+            Button("确认切换", systemImage: "arrow.triangle.branch") {
+              isConfirmingSwitch = true
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!viewModel.isConfirmEnabled || viewModel.isBusy)
+          }
+
+          ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+              ForEach(viewModel.repos) { repo in
+                RepoSwitchRow(
+                  repo: repo,
+                  operationResult: viewModel.operationResults[repo.name],
+                  operationDetail: viewModel.operationDetails[repo.name]
+                )
+              }
+            }
+            .padding(.vertical, 4)
+          }
+          .frame(minHeight: 180)
+          .accessibilityLabel("仓库目标列表")
+        }
+      }
+
+      Spacer(minLength: 0)
     }
     .padding()
-    .background(Color(NSColor.windowBackgroundColor))
-    .clipShape(.rect(cornerRadius: 8))
-  }
-
-  private var projectPicker: some View {
-    HStack {
-      Text("主工程：")
-        .frame(width: 80, alignment: .trailing)
-
-      TextField("请选择主工程目录", text: $viewModel.projectPath)
-        .textFieldStyle(.roundedBorder)
-        .disabled(true)
-
-      Button("浏览", systemImage: "folder") {
-        viewModel.selectProject()
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .confirmationDialog(
+      "确认切换公版仓库？",
+      isPresented: $isConfirmingSwitch,
+      titleVisibility: .visible
+    ) {
+      Button("切换 \(viewModel.repos.count) 个仓库", role: .destructive) {
+        viewModel.switchRepos()
       }
-      .disabled(viewModel.isBusy)
-
-      Button("刷新分支", systemImage: "arrow.clockwise") {
-        viewModel.loadBranches()
-      }
-      .disabled(viewModel.projectPath.isEmpty || viewModel.isBusy)
-
-      Button("拉取全部最新代码", systemImage: "arrow.down.to.line.compact") {
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("将按 repos.yml 对主工作区及依赖仓库切换分支或 Tag。存在本地修改的仓库可能无法切换。")
+    }
+    .confirmationDialog(
+      "拉取全部公版仓库？",
+      isPresented: $isConfirmingPull,
+      titleVisibility: .visible
+    ) {
+      Button("开始拉取") {
         viewModel.pullAllRepositories()
       }
-      .buttonStyle(.borderedProminent)
-      .disabled(viewModel.projectPath.isEmpty || viewModel.isBusy)
-
-      Button("在 Xcode 中打开", systemImage: "hammer") {
-        viewModel.openInXcode()
-      }
-      .disabled(!viewModel.hasWorkspace || viewModel.isBusy)
-
-      if viewModel.isBusy {
-        ProgressView()
-          .scaleEffect(0.8)
-      }
-    }
-    .padding(.horizontal)
-  }
-
-  @ViewBuilder
-  private var branchPicker: some View {
-    if !viewModel.localBranches.isEmpty {
-      HStack {
-        Text("主分支：")
-          .frame(width: 80, alignment: .trailing)
-
-        Picker("", selection: $viewModel.selectedBranch) {
-          ForEach(viewModel.localBranches, id: \.self) { branch in
-            Text(branch).tag(branch)
-          }
-        }
-        .labelsHidden()
-        .pickerStyle(.menu)
-        .onChange(of: viewModel.selectedBranch) { _, _ in
-          viewModel.branchSelectionChanged()
-        }
-
-        if !viewModel.currentBranch.isEmpty {
-          Text("当前：\(viewModel.currentBranch)")
-            .foregroundStyle(.secondary)
-        }
-
-        Spacer()
-
-        Button("读取 repos.yml", systemImage: "doc.text.magnifyingglass") {
-          viewModel.loadData()
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(viewModel.selectedBranch.isEmpty || viewModel.isBusy)
-      }
-      .padding(.horizontal)
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("将读取 repos.yml 并逐仓拉取。遇到本地修改时按工具的自动暂存与恢复策略处理。")
     }
   }
 
-  @ViewBuilder
-  private var configSummary: some View {
-    if !viewModel.configPath.isEmpty {
-      VStack(alignment: .leading, spacing: 6) {
-        labeledValue(title: "配置文件：", value: viewModel.configPath)
-        if !viewModel.rootPath.isEmpty {
-          labeledValue(title: "根目录：", value: viewModel.rootPath)
-        }
-        if let pullSummary = viewModel.pullSummary {
-          labeledValue(title: "拉取结果：", value: pullSummary)
-        }
-      }
-      .padding(.horizontal)
-    }
-  }
-
-  @ViewBuilder
-  private var reposList: some View {
-    if viewModel.repos.isEmpty {
-      VStack(spacing: 10) {
-        Image(systemName: "tray")
-          .font(.largeTitle)
-          .foregroundStyle(.secondary)
-        Text("未读取到仓库")
-          .font(.headline)
-        Text("请选择主工程目录并读取本地分支后，再读取 repos.yml")
-          .foregroundStyle(.secondary)
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-    } else {
-      VStack(alignment: .leading, spacing: 10) {
-        HStack {
-          Text("切换仓库")
-            .font(.headline)
-          Text("\(viewModel.repos.count)")
-            .foregroundStyle(.secondary)
-          Spacer()
-          Button("确认切换", systemImage: "arrow.triangle.branch") {
-            viewModel.switchRepos()
-          }
-          .buttonStyle(.borderedProminent)
-          .disabled(!viewModel.isConfirmEnabled || viewModel.isBusy)
-        }
-
-        ScrollView {
-          LazyVStack(alignment: .leading, spacing: 8) {
-            ForEach(viewModel.repos) { repo in
-              RepoSwitchRow(repo: repo)
-            }
-          }
-          .padding(.vertical, 4)
-        }
-      }
-      .padding(.horizontal)
-    }
-  }
-
-  private func labeledValue(title: String, value: String) -> some View {
-    HStack(alignment: .firstTextBaseline, spacing: 8) {
-      Text(title)
-        .frame(width: 80, alignment: .trailing)
-        .foregroundStyle(.secondary)
-      Text(value)
-        .font(.system(.body, design: .monospaced))
-        .textSelection(.enabled)
-        .lineLimit(2)
-      Spacer()
-    }
+  private var progressLabel: String {
+    if viewModel.isPulling { return "正在拉取仓库…" }
+    if viewModel.isSwitching { return "正在切换仓库…" }
+    return "正在读取仓库…"
   }
 }
 
 private struct RepoSwitchRow: View {
   let repo: RepoSwitchInfo
+  let operationResult: String?
+  let operationDetail: String?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      HStack(spacing: 10) {
+      HStack(spacing: 8) {
         Image(systemName: iconName)
           .foregroundStyle(statusColor)
+          .accessibilityHidden(true)
         Text(repo.name)
           .font(.headline)
         Spacer()
-        Text(statusText)
-          .font(.caption)
-          .foregroundStyle(statusColor)
+        ToolStatusBadge(statusText, kind: statusKind)
+        if let operationResult {
+          ToolStatusBadge(operationResult, kind: operationStatusKind)
+        }
       }
 
       HStack(spacing: 8) {
-        BranchBadge(title: "当前", value: repo.currentBranch, style: .secondary)
-        Image(systemName: "arrow.right")
+        Text(repo.currentBranch.isEmpty ? "未知" : repo.currentBranch)
           .foregroundStyle(.secondary)
-        BranchBadge(title: targetTitle, value: targetValue, style: .blue)
+        Image(systemName: "arrow.right")
+          .foregroundStyle(.tertiary)
+          .accessibilityHidden(true)
+        Text(targetValue)
+          .foregroundStyle(.tint)
+        ToolStatusBadge(repo.targetTag == nil ? "分支" : "Tag")
         Spacer()
       }
+      .font(.system(.caption, design: .monospaced))
 
       Text(repo.path)
         .font(.system(.caption, design: .monospaced))
         .foregroundStyle(.secondary)
         .textSelection(.enabled)
+        .lineLimit(2)
+
+      if let operationDetail {
+        Text(operationDetail)
+          .font(.caption)
+          .foregroundStyle(operationResult == "失败" ? .red : .secondary)
+          .textSelection(.enabled)
+      }
     }
     .padding(10)
-    .background(Color.black.opacity(0.04))
-    .clipShape(.rect(cornerRadius: 8))
-  }
-
-  private var iconName: String {
-    if repo.scope == .workspace {
-      return "folder.badge.gearshape"
-    }
-    return repo.isCloned ? "checkmark.circle.fill" : "arrow.down.circle"
-  }
-
-  private var statusText: String {
-    if repo.scope == .workspace {
-      return repo.isCloned ? "父工作区" : "非 Git 仓库"
-    }
-    return repo.isCloned ? "已存在" : "待克隆"
-  }
-
-  private var statusColor: Color {
-    if repo.scope == .workspace {
-      return repo.isCloned ? .purple : .red
-    }
-    return repo.isCloned ? .green : .orange
-  }
-
-  private var targetTitle: String {
-    repo.targetTag == nil ? "目标分支" : "目标Tag"
+    .background(.quaternary, in: .rect(cornerRadius: 8))
+    .accessibilityElement(children: .contain)
   }
 
   private var targetValue: String {
     repo.targetTag ?? repo.targetBranch
   }
-}
 
-private struct BranchBadge: View {
-  enum BadgeStyle {
-    case secondary
-    case blue
+  private var iconName: String {
+    if repo.scope == .workspace { return "folder.badge.gearshape" }
+    return repo.isCloned ? "checkmark.circle.fill" : "arrow.down.circle"
   }
 
-  let title: String
-  let value: String
-  let style: BadgeStyle
+  private var statusText: String {
+    if repo.scope == .workspace { return repo.isCloned ? "主工作区" : "非 Git 仓库" }
+    return repo.isCloned ? "已存在" : "待克隆"
+  }
 
-  var body: some View {
-    HStack(spacing: 4) {
-      Text(title)
-        .foregroundStyle(.secondary)
-      Text(value)
-        .foregroundStyle(style == .blue ? .blue : .primary)
+  private var statusColor: Color {
+    if repo.scope == .workspace { return repo.isCloned ? .purple : .red }
+    return repo.isCloned ? .green : .orange
+  }
+
+  private var statusKind: ToolStatusBadge.Kind {
+    if repo.scope == .workspace { return repo.isCloned ? .neutral : .failure }
+    return repo.isCloned ? .success : .warning
+  }
+
+  private var operationStatusKind: ToolStatusBadge.Kind {
+    switch operationResult {
+    case "成功": .success
+    case "失败": .failure
+    case "跳过": .warning
+    default: .neutral
     }
-    .font(.system(.caption, design: .monospaced))
-    .padding(.horizontal, 8)
-    .padding(.vertical, 4)
-    .background(Color.black.opacity(0.05))
-    .clipShape(.rect(cornerRadius: 6))
   }
 }

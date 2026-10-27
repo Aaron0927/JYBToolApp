@@ -1,6 +1,6 @@
 import Foundation
 
-public struct RenameResult {
+public struct RenameResult: Sendable {
     public let success: Bool
     public let filesReplaced: Int
     public let directoriesRenamed: Int
@@ -39,9 +39,12 @@ public struct RenameResult {
     }
 }
 
-public enum RenamerError: LocalizedError {
+public enum RenamerError: LocalizedError, Sendable {
     case sourceNotFound(String)
     case sourceNotDirectory(String)
+    case targetPathEmpty
+    case targetNotDirectory(String)
+    case pathsOverlap(String, String)
     case emptyPrefix(String)
     case prefixesIdentical
     case targetExists(String)
@@ -55,6 +58,12 @@ public enum RenamerError: LocalizedError {
             return "源文件夹不存在: \(path)"
         case .sourceNotDirectory(let path):
             return "源路径不是文件夹: \(path)"
+        case .targetPathEmpty:
+            return "目标路径不能为空"
+        case .targetNotDirectory(let path):
+            return "目标路径已存在但不是文件夹: \(path)"
+        case .pathsOverlap(let source, let target):
+            return "源路径和目标路径不能相同或互相包含：\(source) → \(target)"
         case .emptyPrefix(let name):
             return "\(name)不能为空"
         case .prefixesIdentical:
@@ -71,7 +80,7 @@ public enum RenamerError: LocalizedError {
     }
 }
 
-public enum StepStatus {
+public enum StepStatus: Sendable {
     case pending
     case inProgress
     case completed

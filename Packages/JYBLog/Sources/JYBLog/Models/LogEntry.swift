@@ -53,8 +53,6 @@ public struct LogEntry: Identifiable, Equatable, Sendable {
     }
 
     public var formattedTime: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: timestamp)
+        timestamp.formatted(date: .omitted, time: .standard)
     }
 }

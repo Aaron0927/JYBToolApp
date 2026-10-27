@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>JYBToolApp · 全应用交互原型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --canvas: #f4f5f7;
+      --sidebar: #eceef1;
+      --surface: #fff;
+      --surface-muted: #f7f8fa;
+      --line: #d9dde3;
+      --text: #1e2329;
+      --secondary: #626b76;
+      --tertiary: #818a95;
+      --accent: #146bd1;
+      --accent-soft: #e8f1fc;
+      --green: #23834b;
+      --green-soft: #e8f5ed;
+      --orange: #a65b00;
+      --orange-soft: #fff3df;
+      --red: #bd3434;
+      --red-soft: #fbeaea;
+      --shadow: 0 12px 36px #1118271a;
+      font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --canvas: #17191c;
+        --sidebar: #202327;
+        --surface: #25292e;
+        --surface-muted: #2b3036;
+        --line: #3a4048;
+        --text: #edf0f3;
+        --secondary: #b0b8c2;
+        --tertiary: #858e99;
+        --accent: #6daeff;
+        --accent-soft: #26384d;
+        --green: #73d397;
+        --green-soft: #22392b;
+        --orange: #ffc16b;
+        --orange-soft: #42331f;
+        --red: #ff8585;
+        --red-soft: #432929;
+        --shadow: 0 12px 36px #0008;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--text); background: var(--canvas); }
+    button, input, select { font: inherit; color: inherit; }
+    button, select { min-height: 32px; }
+    button {
+      border: 1px solid var(--line); border-radius: 7px; padding: 6px 11px;
+      background: var(--surface); cursor: pointer; white-space: nowrap;
+    }
+    button:hover { border-color: var(--accent); }
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 1px;
+    }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+    button.danger { background: var(--red); border-color: var(--red); color: white; }
+    button.quiet { border-color: transparent; background: transparent; color: var(--secondary); }
+    input, select { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; background: var(--surface); }
+    input[readonly] { color: var(--secondary); }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    .app { display: grid; grid-template-columns: 224px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 176px; min-height: 620px; height: 100vh; }
+    aside { grid-row: 1 / 3; padding: 18px 12px; background: var(--sidebar); border-right: 1px solid var(--line); }
+    .brand { display: flex; gap: 10px; align-items: center; padding: 2px 8px 22px; font-weight: 700; }
+    .brand-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 16px; }
+    .nav-label { margin: 15px 9px 5px; color: var(--tertiary); font-size: 11px; font-weight: 650; }
+    .nav-item { display: flex; align-items: center; gap: 9px; width: 100%; margin: 2px 0; border-color: transparent; background: transparent; text-align: left; }
+    .nav-item.active { color: var(--accent); background: var(--accent-soft); border-color: transparent; font-weight: 650; }
+    .nav-icon { width: 17px; text-align: center; }
+    main { min-width: 0; overflow: auto; }
+    .topbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 22px; background: color-mix(in srgb, var(--canvas) 92%, transparent); border-bottom: 1px solid var(--line); backdrop-filter: blur(14px); }
+    .crumb { color: var(--secondary); }
+    .demo-controls { display: flex; align-items: center; gap: 8px; color: var(--secondary); font-size: 12px; }
+    .demo-controls select { min-height: 29px; padding: 4px 8px; }
+    .prototype-label { color: var(--tertiary); font-size: 11px; }
+    .page { width: min(1100px, 100%); margin: 0 auto; padding: 22px; }
+    .page-heading { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+    .page-icon { color: var(--accent); font-size: 22px; line-height: 1.25; }
+    h1 { margin: 0; font-size: 21px; letter-spacing: -.2px; }
+    h2 { margin: 0; font-size: 14px; }
+    h3 { margin: 0; font-size: 13px; }
+    p { margin: 4px 0 0; color: var(--secondary); }
+    .panel { margin-bottom: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 15px; border-bottom: 1px solid var(--line); }
+    .panel-head p { font-size: 12px; }
+    .panel-body { padding: 14px 15px; }
+    .toolbar, .row, .actions, .inline-field { display: flex; align-items: center; gap: 8px; }
+    .toolbar { flex-wrap: wrap; }
+    .toolbar .path-input { flex: 1 1 280px; }
+    .path-input { width: 100%; }
+    .field { display: grid; gap: 5px; min-width: 0; }
+    .field label { color: var(--secondary); font-size: 12px; }
+    .grid-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .summary { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 14px; color: var(--secondary); font-size: 12px; }
+    .chip, .status { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 3px 8px; border-radius: 999px; background: var(--surface-muted); color: var(--secondary); font-size: 11px; }
+    .status.success { color: var(--green); background: var(--green-soft); }
+    .status.warning { color: var(--orange); background: var(--orange-soft); }
+    .status.failure { color: var(--red); background: var(--red-soft); }
+    .list { display: grid; gap: 8px; }
+    .repo-row { padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .repo-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .repo-name { font-weight: 650; }
+    .repo-path { margin-top: 5px; color: var(--tertiary); font-size: 11px; }
+    .target-line { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 7px; font-size: 12px; }
+    .target-line .arrow { color: var(--tertiary); }
+    .empty { display: grid; justify-items: center; gap: 5px; min-height: 140px; padding: 24px; color: var(--secondary); text-align: center; }
+    .empty-icon { color: var(--tertiary); font-size: 23px; }
+    .empty strong { color: var(--text); font-size: 13px; }
+    .callout { margin-top: 12px; padding: 10px 12px; border-radius: 7px; background: var(--orange-soft); color: var(--orange); }
+    .callout.success { background: var(--green-soft); color: var(--green); }
+    .callout.warning { background: var(--orange-soft); color: var(--orange); }
+    .callout.failure { background: var(--red-soft); color: var(--red); }
+    .error-box { margin-top: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--red) 45%, var(--line)); border-radius: 7px; background: var(--red-soft); color: var(--red); }
+    .progress { display: flex; align-items: center; gap: 8px; padding: 10px 0; color: var(--accent); }
+    .spinner { width: 14px; height: 14px; border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .copy-pair { padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+    .copy-pair + .copy-pair { margin-top: 9px; }
+    .copy-pair-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
+    .separator { margin: 15px 0; border-top: 1px solid var(--line); }
+    .footer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+    .hint { color: var(--secondary); font-size: 11px; }
+    .log-panel { min-width: 0; display: flex; flex-direction: column; background: var(--surface); border-top: 1px solid var(--line); }
+    .log-head { display: flex; align-items: center; gap: 9px; padding: 8px 13px; }
+    .log-head strong { font-size: 12px; }
+    .log-filters { display: flex; align-items: center; gap: 4px; margin-left: 12px; }
+    .log-filter { min-height: 25px; padding: 2px 7px; font-size: 10px; }
+    .log-filter.active { color: var(--accent); background: var(--accent-soft); }
+    .log-list { overflow: auto; padding: 0 14px 10px; font: 11px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .log-entry { display: grid; grid-template-columns: 65px 55px minmax(0, 1fr); gap: 8px; color: var(--secondary); }
+    .log-entry .level { font-weight: 700; }
+    .log-entry.success .level { color: var(--green); }
+    .log-entry.warning .level { color: var(--orange); }
+    .log-entry.error .level { color: var(--red); }
+    dialog { width: min(470px, calc(100vw - 28px)); padding: 0; color: var(--text); border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+    dialog::backdrop { background: #0006; backdrop-filter: blur(2px); }
+    .dialog-content { padding: 18px; }
+    .dialog-content h2 { font-size: 16px; }
+    .dialog-content p { margin-top: 8px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .toast { position: fixed; right: 20px; bottom: 190px; z-index: 5; max-width: min(420px, calc(100vw - 32px)); padding: 9px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); opacity: 0; pointer-events: none; transform: translateY(8px); transition: .18s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    @media (max-width: 760px) {
+      .app { grid-template-columns: 62px minmax(0, 1fr); }
+      aside { padding: 12px 6px; }
+      .brand { justify-content: center; padding: 2px 0 17px; }
+      .brand-name, .nav-label, .nav-text { display: none; }
+      .nav-item { justify-content: center; padding: 8px 4px; }
+      .nav-icon { width: auto; }
+      .topbar { align-items: flex-start; flex-direction: column; padding: 10px 14px; }
+      .page { padding: 16px 12px; }
+      .grid-two { grid-template-columns: 1fr; }
+      .log-filters { overflow: auto; margin-left: 0; }
+      .log-head { flex-wrap: wrap; }
+      .app { grid-template-rows: minmax(0, 1fr) 190px; }
+      .prototype-label { display: none; }
+    }
+    @media (max-width: 480px) {
+      .actions, .toolbar { align-items: stretch; flex-direction: column; }
+      .actions button, .toolbar button { width: 100%; }
+      .footer-actions { align-items: stretch; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside aria-label="工具导航">
+      <div class="brand"><span class="brand-icon" aria-hidden="true">J</span><span class="brand-name">JYBToolApp</span></div>
+      <div class="nav-label">公版</div>
+      <button class="nav-item" data-page="submodules"><span class="nav-icon" aria-hidden="true">⑂</span><span class="nav-text">主仓库子模块</span></button>
+      <button class="nav-item active" data-page="public"><span class="nav-icon" aria-hidden="true">▣</span><span class="nav-text">公版依赖仓库</span></button>
+      <div class="nav-label">私版</div>
+      <button class="nav-item" data-page="broker"><span class="nav-icon" aria-hidden="true">⇄</span><span class="nav-text">券商仓库切换</span></button>
+      <button class="nav-item" data-page="copy"><span class="nav-icon" aria-hidden="true">▢</span><span class="nav-text">私版项目复制</span></button>
+    </aside>
+    <main>
+      <header class="topbar">
+        <div class="crumb"><span id="crumb-group">Git 工具</span>　/　<strong id="crumb-page">公版依赖仓库</strong></div>
+        <div class="demo-controls"><label for="outcome-mode">演示结果</label><select id="outcome-mode"><option value="success">全部成功</option><option value="partial">部分失败</option><option value="failure">全部失败</option></select><span class="prototype-label">HTML 原型 · 操作均为模拟</span></div>
+      </header>
+      <div class="page" id="page" tabindex="-1"></div>
+    </main>
+    <section class="log-panel" aria-label="统一日志">
+      <div class="log-head"><strong>执行日志 <span id="log-count">0</span></strong><div class="log-filters" id="log-filters"></div><button class="quiet" id="log-clear">清空日志</button></div>
+      <div class="log-list" id="log-list" aria-live="polite"></div>
+    </section>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div class="dialog-content" id="dialog-content"></div></dialog>
+  <script>
+    const demoRepos = [
+      { name: "TradeBook_App", current: "develop", target: "develop", kind: "分支", path: "./TradeBook_App", cloned: true },
+      { name: "TradeBook_Private", current: "develop", target: "v8.4.18", kind: "Tag", path: "./TradeBook_Private", cloned: true },
+      { name: "TradeBook_Public", current: "develop", target: "v8.4.20", kind: "Tag", path: "./TradeBook_Public", cloned: true },
+      { name: "Flutter_Module", current: "develop", target: "develop", kind: "分支", path: "./Flutter_Module", cloned: true },
+      { name: "Trade_UI", current: "public_release", target: "public_release", kind: "分支", path: "./Trade_UI", cloned: true },
+      { name: "Trade_ModuleTrade", current: "JYB_1.5.1", target: "JYB_1.5.2", kind: "分支", path: "./Trade_ModuleTrade", cloned: false }
+    ];
+    const brokerRepos = [
+      { name: "TradeBook_Main", current: "develop", target: "dev", kind: "分支", path: "../TradeBook_Main/repos", cloned: true },
+      { name: "TradeBook_Trade", current: "dev", target: "dev", kind: "分支", path: "../TradeBook_Trade", cloned: true },
+      { name: "TradeBook_Quote", current: "release/8.4", target: "dev", kind: "分支", path: "../TradeBook_Quote", cloned: true },
+      { name: "TradeBook_Base", current: "dev", target: "dev", kind: "分支", path: "../TradeBook_Base", cloned: true },
+      { name: "TradeBook_UI", current: "feature/layout", target: "dev", kind: "分支", path: "../TradeBook_UI", cloned: true }
+    ];
+    const demoSubmodules = [
+      { name: "Trade_Comm", current: "develop", target: "public_release" },
+      { name: "Trade_UI", current: "release/8.4", target: "develop" },
+      { name: "Trade_Base", current: "develop", target: "public_release" },
+      { name: "Trade_Public", current: "develop", target: "develop" }
+    ];
+    const names = { broker: "私版券商切换", submodules: "主仓库子模块", public: "公版依赖仓库", copy: "私版项目复制" };
+    const state = {
+      page: "public", mode: "success", loaded: { broker: false, submodules: false, public: false },
+      busy: false, logs: [], activeLevels: new Set(["info", "success", "warning", "error"]),
+      outcomes: {}, errors: {}, copyPairs: 1, copyResult: null
+    };
+    const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    const pageRoot = document.getElementById("page");
+    const dialog = document.getElementById("dialog");
+    const statusClass = status => status === "成功" ? "success" : status === "失败" ? "failure" : status === "跳过" ? "warning" : "";
+    const now = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
+
+    function addLog(level, message) {
+      state.logs.unshift({ time: now(), level, message });
+      renderLogs();
+    }
+    function renderLogs() {
+      const list = document.getElementById("log-list");
+      const visible = state.logs.filter(entry => state.activeLevels.has(entry.level));
+      document.getElementById("log-count").textContent = state.logs.length;
+      list.innerHTML = visible.length ? visible.map(entry => `<div class="log-entry ${entry.level}"><span>${escapeHTML(entry.time)}</span><span class="level">${escapeHTML(entry.level.toUpperCase())}</span><span>${escapeHTML(entry.message)}</span></div>`).join("") : '<div class="hint">当前筛选下没有日志</div>';
+      document.getElementById("log-filters").innerHTML = ["info", "success", "warning", "error"].map(level => `<button class="log-filter ${state.activeLevels.has(level) ? "active" : ""}" data-log-filter="${level}" aria-pressed="${state.activeLevels.has(level)}">${level.toUpperCase()}</button>`).join("");
+    }
+    function heading(group, page, icon, description) {
+      document.getElementById("crumb-group").textContent = group;
+      document.getElementById("crumb-page").textContent = page;
+      return `<div class="page-heading"><div class="page-icon" aria-hidden="true">${icon}</div><div><h1>${page}</h1><p>${description}</p></div></div>`;
+    }
+    function empty(title, detail, icon = "▱") {
+      return `<div class="empty"><span class="empty-icon" aria-hidden="true">${icon}</span><strong>${title}</strong><span>${detail}</span></div>`;
+    }
+    function progress(label) { return `<div class="progress" role="status"><span class="spinner" aria-hidden="true"></span>${label}</div>`; }
+    function repoRows(repos, resultMap = {}) {
+      resultMap ||= {};
+      return `<div class="list">${repos.map(repo => {
+        const status = resultMap[repo.name] || (repo.cloned === false ? "待克隆" : "待执行");
+        const klass = statusClass(status);
+        return `<article class="repo-row"><div class="repo-top"><span class="repo-name">${escapeHTML(repo.name)}</span><span class="status ${klass}">${escapeHTML(status)}</span></div><div class="target-line"><span class="mono">${escapeHTML(repo.current || "未检出")}</span><span class="arrow" aria-hidden="true">→</span><b class="mono">${escapeHTML(repo.target)}</b><span class="chip">${escapeHTML(repo.kind || "分支")}</span></div><div class="repo-path mono">${escapeHTML(repo.path || "仓库路径待解析")}</div></article>`;
+      }).join("")}</div>`;
+    }
+    function renderBroker() {
+      const loaded = state.loaded.broker;
+      pageRoot.innerHTML = heading("私版", names.broker, "⇄", "按 repos.yaml 逐仓查看目标分支，确认后批量切换。") +
+        `<section class="panel"><div class="panel-head"><div><h2>配置仓库</h2><p>选择包含 repos.yaml 的私版配置目录</p></div></div><div class="panel-body"><div class="toolbar"><input class="path-input mono" id="broker-path" readonly value="${loaded ? "/workspace/TradeBook_Private_Config" : ""}" placeholder="选择配置仓库目录" aria-label="配置仓库路径"><button data-action="choose-broker">选择演示目录</button><select id="broker-branch" aria-label="选择目标分支"><option>dev</option><option>develop</option><option>release/8.4</option></select><button class="primary" data-action="load-broker">读取仓库状态</button></div>${state.busy && state.page === "broker" ? progress("正在读取仓库和分支状态…") : ""}${state.errors.broker ? `<div class="error-box" role="alert">${escapeHTML(state.errors.broker)}</div>` : ""}</div></section>` +
+        `<section class="panel"><div class="panel-head"><div><h2>切换预览</h2><p>逐仓展示当前分支、目标分支、路径和工作区状态</p></div>${loaded ? `<span class="chip">${brokerRepos.length} 个仓库</span>` : ""}</div><div class="panel-body">${loaded ? repoRows(brokerRepos, state.outcomes.broker) : empty("尚未加载配置", "选择配置仓库并读取状态后，这里会展示可执行范围。")}${state.outcomes.broker ? resultSummary(state.outcomes.broker) : ""}${state.busy && state.page === "broker" ? progress("正在切换仓库；单仓结果将逐项更新…") : ""}<div class="footer-actions"><span class="hint">工作区有本地修改时按现有自动暂存与恢复规则处理。</span><button class="primary" data-action="switch-broker" ${loaded && !state.busy ? "" : "disabled"}>确认切换</button></div></div></section>`;
+    }
+    function renderSubmodules() {
+      const loaded = state.loaded.submodules;
+      const branches = ["develop", "release/8.4", "feature/layout"];
+      pageRoot.innerHTML = heading("公版", names.submodules, "⑂", "切换主仓库分支，并按该分支中的配置同步子模块。") +
+        `<section class="panel"><div class="panel-head"><div><h2>主仓库</h2><p>读取主分支和子模块目标</p></div></div><div class="panel-body"><div class="toolbar"><input id="submodule-path" class="path-input mono" readonly value="${loaded ? "/workspace/TradeBook_Main" : ""}" placeholder="选择主仓库目录" aria-label="主仓库路径"><button data-action="choose-submodules">选择演示目录</button><select id="submodule-branch" aria-label="目标主仓库分支">${branches.map(branch => `<option>${branch}</option>`).join("")}</select><button class="primary" data-action="load-submodules">读取仓库状态</button></div>${state.busy && state.page === "submodules" ? progress("正在读取主仓库与子模块…") : ""}${state.errors.submodules ? `<div class="error-box" role="alert">${escapeHTML(state.errors.submodules)}</div>` : ""}</div></section>` +
+        `<section class="panel"><div class="panel-head"><div><h2>子模块目标预览</h2><p>确认当前值、配置目标和子模块路径</p></div></div><div class="panel-body">${loaded ? repoRows(demoSubmodules.map(repo => ({ ...repo, path: `Modules/${repo.name}`, kind: "分支", cloned: true })), state.outcomes.submodules) : empty("尚未读取主仓库", "读取后展示每个子模块当前分支与目标分支。")}${state.outcomes.submodules ? resultSummary(state.outcomes.submodules) : ""}${state.busy && state.page === "submodules" ? progress("主仓库和子模块切换中…") : ""}<div class="footer-actions"><span class="hint">主仓库工作区应先保存或提交本地修改。</span><button class="primary" data-action="switch-submodules" ${loaded && !state.busy ? "" : "disabled"}>确认切换</button></div></div></section>`;
+    }
+    function renderPublic() {
+      const loaded = state.loaded.public;
+      pageRoot.innerHTML = heading("公版", names.public, "▣", "读取 fastlane/repos.yml，按配置切换分支或 Tag，也可批量拉取最新代码。") +
+        `<section class="panel"><div class="panel-head"><div><h2>主工程</h2><p>目标版本来自主工程选定分支中的 repos.yml</p></div></div><div class="panel-body"><div class="toolbar"><input id="public-path" class="path-input mono" readonly value="${loaded ? "/workspace/TradeBook_App" : ""}" placeholder="选择主工程目录" aria-label="主工程路径"><button data-action="choose-public">选择演示目录</button><select id="public-branch" aria-label="主工程分支"><option>develop</option><option>public_release</option><option>release/8.4</option></select><button data-action="load-public">读取 repos.yml</button><button data-action="pull-public" ${state.busy ? "disabled" : ""}>拉取全部最新代码</button></div>${state.busy && state.page === "public" ? progress("正在读取配置或执行仓库操作…") : ""}${state.errors.public ? `<div class="error-box" role="alert">${escapeHTML(state.errors.public)}</div>` : ""}${state.outcomes.pull ? resultSummary(state.outcomes.pull) : ""}</div></section>` +
+        `<section class="panel"><div class="panel-head"><div><h2>仓库切换预览</h2><p>当前分支与目标分支/Tag 按配置文件展示</p></div>${loaded ? `<span class="chip">${demoRepos.length} 个仓库</span>` : ""}</div><div class="panel-body">${loaded ? repoRows(demoRepos, state.outcomes.public) : empty("尚未读取仓库", "选择主工程、读取本地分支，再载入 fastlane/repos.yml。")}${state.outcomes.public ? resultSummary(state.outcomes.public) : ""}${state.busy && state.page === "public" ? progress("正在按配置切换仓库…") : ""}<div class="footer-actions"><span class="hint">Tag 目标从 repos.yml 读取；本原型不提供 Tag 创建、推送、删除或配置编辑。</span><button class="primary" data-action="switch-public" ${loaded && !state.busy ? "" : "disabled"}>确认切换</button></div></div></section>`;
+    }
+    function renderCopy() {
+      const pairs = Array.from({ length: state.copyPairs }, (_, index) => `<div class="copy-pair"><div class="copy-pair-head"><b>路径对 ${index + 1}</b><button class="quiet" data-action="remove-pair" data-index="${index}" ${state.copyPairs === 1 ? "disabled" : ""}>移除</button></div><div class="grid-two"><div class="field"><label for="source-${index}">源项目目录</label><div class="inline-field"><input id="source-${index}" class="path-input mono" readonly value="${index === 0 ? "/workspace/TradeBook_Public" : ""}" placeholder="选择源项目目录"><button data-action="browse-source" data-index="${index}">浏览</button></div></div><div class="field"><label for="target-${index}">目标项目目录</label><div class="inline-field"><input id="target-${index}" class="path-input mono" readonly value="${index === 0 ? "/workspace/TradeBook_Test" : ""}" placeholder="选择目标项目目录"><button data-action="browse-target" data-index="${index}">浏览</button></div></div></div></div>`).join("");
+      pageRoot.innerHTML = heading("私版", names.copy, "▢", "批量复制项目，并按预览替换代码与文件名中的前缀。") +
+        `<section class="panel"><div class="panel-head"><div><h2>复制设置</h2><p>原型只模拟路径选择、确认和结果，不访问本地文件。</p></div></div><div class="panel-body">${pairs}<div class="footer-actions"><span class="hint">目标目录中与源项目同名的文件可能被覆盖。</span><button data-action="add-pair">添加路径对</button></div><div class="separator"></div><div class="grid-two"><div class="field"><label for="old-prefix">旧前缀</label><input id="old-prefix" value="GDC" placeholder="原项目名称前缀"></div><div class="field"><label for="new-prefix">新前缀</label><input id="new-prefix" value="JYB" placeholder="新项目名称前缀"></div></div><div class="callout">受保护关键词：GDCASDK。复制后将展示执行步骤、警告和结果汇总。</div>${state.copyResult ? copyResultHTML() : ""}<div class="footer-actions"><span class="hint">确认后开始演示进度，不会写入任何文件。</span><button class="primary" data-action="preview-copy" ${state.busy ? "disabled" : ""}>预览并开始复制</button></div></div></section>`;
+    }
+    function resultSummary(outcome) {
+      const rows = Object.values(outcome);
+      const ok = rows.filter(value => value === "成功").length;
+      const fail = rows.filter(value => value === "失败").length;
+      const skipped = rows.filter(value => value === "跳过").length;
+      const cls = fail ? (ok ? "warning" : "failure") : "success";
+      return `<div class="callout ${cls}">执行汇总：成功 ${ok}，跳过 ${skipped}，失败 ${fail}。详情已按仓库写入日志。</div>`;
+    }
+    function copyResultHTML() {
+      if (state.copyResult.status === "running") return progress("复制项目并替换前缀中…");
+      const failed = state.copyResult.status === "失败";
+      return `<div class="${failed ? "error-box" : "callout"}" role="status"><b>复制${failed ? "未完成" : "完成"}</b><div>${escapeHTML(state.copyResult.message)}</div><div class="hint">已处理 ${state.copyResult.done} 组；失败 ${state.copyResult.failed} 组。</div></div>`;
+    }
+    function renderPage() {
+      document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.page === state.page));
+      ({ broker: renderBroker, submodules: renderSubmodules, public: renderPublic, copy: renderCopy })[state.page]();
+    }
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      window.setTimeout(() => toast.classList.remove("show"), 2200);
+    }
+    function confirmAction(title, message, actionLabel, action, danger = true) {
+      document.getElementById("dialog-content").innerHTML = `<h2 id="dialog-title">${escapeHTML(title)}</h2><p>${escapeHTML(message)}</p><div class="dialog-actions"><button data-dialog-cancel>返回检查</button><button class="${danger ? "danger" : "primary"}" data-dialog-confirm>${escapeHTML(actionLabel)}</button></div>`;
+      dialog.showModal();
+      dialog.querySelector("[data-dialog-cancel]").focus();
+      dialog.querySelector("[data-dialog-cancel]").onclick = () => dialog.close();
+      dialog.querySelector("[data-dialog-confirm]").onclick = () => { dialog.close(); action(); };
+    }
+    function simulateBatch(key, repos, actionLabel) {
+      if (state.busy) return;
+      state.busy = true;
+      state.outcomes[key] = null;
+      addLog("info", `${actionLabel}：开始处理 ${repos.length} 个仓库（模拟）`);
+      renderPage();
+      window.setTimeout(() => {
+        const outcome = {};
+        const partialFailureIndex = key === "pull" && repos.at(-1)?.cloned === false ? repos.length - 2 : repos.length - 1;
+        repos.forEach((repo, index) => {
+          const skipped = key === "pull" && repo.cloned === false;
+          const failed = state.mode === "failure" || (state.mode === "partial" && index === partialFailureIndex);
+          outcome[repo.name] = skipped ? "跳过" : failed ? "失败" : "成功";
+          const level = outcome[repo.name] === "失败" ? "error" : outcome[repo.name] === "跳过" ? "warning" : "success";
+          const message = skipped ? "工作区不存在，未执行拉取" : failed ? "模拟失败：工作区状态或远端不可用" : "操作完成";
+          addLog(level, `${repo.name} · ${message}`);
+        });
+        state.outcomes[key] = outcome;
+        state.busy = false;
+        renderPage();
+        showToast("演示操作已完成");
+      }, 850);
+    }
+    function loadConfig(key, pathId, selectId, label) {
+      const path = document.getElementById(pathId)?.value || "";
+      if (!path) { showToast("请先选择演示目录"); return; }
+      if (state.busy) return;
+      state.errors[key] = null;
+      state.busy = true;
+      renderPage();
+      addLog("info", `正在读取${label}…`);
+      window.setTimeout(() => {
+        state.busy = false;
+        if (state.mode === "failure") {
+          state.loaded[key] = false;
+          state.errors[key] = `${label}读取失败：演示配置文件无效或无法访问。`;
+          addLog("error", `${label}读取失败：演示配置文件无效`);
+          renderPage();
+          showToast("读取失败，请检查配置路径和文件内容");
+          return;
+        }
+        state.loaded[key] = true;
+        state.errors[key] = null;
+        const branch = document.getElementById(selectId)?.value || "develop";
+        addLog("success", `${label}读取完成：目标分支 ${branch}`);
+        renderPage();
+      }, 650);
+    }
+    function pickDemoPath(inputId, path) {
+      const input = document.getElementById(inputId);
+      if (input) input.value = path;
+      addLog("info", `选择演示目录：${path}`);
+    }
+    function runCopy() {
+      if (state.busy) return;
+      const oldPrefix = document.getElementById("old-prefix")?.value.trim() || "";
+      const newPrefix = document.getElementById("new-prefix")?.value.trim() || "";
+      if (!oldPrefix || !newPrefix || oldPrefix === newPrefix) {
+        showToast("请填写不同的旧前缀和新前缀");
+        return;
+      }
+      state.busy = true;
+      state.copyResult = { status: "running", done: 0, failed: 0, message: "按步骤复制、替换并验证项目" };
+      renderPage();
+      addLog("info", `项目复制开始：${state.copyPairs} 组，${oldPrefix} → ${newPrefix}（模拟）`);
+      window.setTimeout(() => {
+        const failed = state.mode === "failure" ? state.copyPairs : state.mode === "partial" ? 1 : 0;
+        const done = state.copyPairs - failed;
+        state.copyResult = { status: failed ? "失败" : "成功", done, failed, message: failed ? "部分目标目录模拟失败。成功项保留，可从日志查看原因。" : "路径校验、复制和前缀替换步骤均已模拟完成。" };
+        state.busy = false;
+        addLog(failed ? "error" : "success", `项目复制结果：成功 ${done}，失败 ${failed}`);
+        renderPage();
+        showToast(failed ? "项目复制出现失败项" : "项目复制演示完成");
+      }, 1100);
+    }
+    document.addEventListener("click", event => {
+      const nav = event.target.closest("[data-page]");
+      if (nav) { state.page = nav.dataset.page; renderPage(); return; }
+      const filter = event.target.closest("[data-log-filter]");
+      if (filter) {
+        const level = filter.dataset.logFilter;
+        state.activeLevels.has(level) ? state.activeLevels.delete(level) : state.activeLevels.add(level);
+        renderLogs(); return;
+      }
+      const button = event.target.closest("[data-action]");
+      if (!button) return;
+      const action = button.dataset.action;
+      if (action === "choose-broker") pickDemoPath("broker-path", "/workspace/TradeBook_Private_Config");
+      if (action === "choose-submodules") pickDemoPath("submodule-path", "/workspace/TradeBook_Main");
+      if (action === "choose-public") pickDemoPath("public-path", "/workspace/TradeBook_App");
+      if (action === "load-broker") loadConfig("broker", "broker-path", "broker-branch", "私版仓库配置");
+      if (action === "load-submodules") loadConfig("submodules", "submodule-path", "submodule-branch", "主仓库子模块配置");
+      if (action === "load-public") loadConfig("public", "public-path", "public-branch", "fastlane/repos.yml");
+      if (action === "switch-broker") confirmAction("确认切换私版仓库？", `将按 repos.yaml 更新 ${brokerRepos.length} 个仓库的分支。请确认已保存需要保留的本地修改。`, "确认切换", () => simulateBatch("broker", brokerRepos, "私版仓库切换"));
+      if (action === "switch-submodules") confirmAction("确认切换主仓库与子模块？", `将切换主仓库并更新 ${demoSubmodules.length} 个子模块。`, "确认切换", () => simulateBatch("submodules", demoSubmodules, "子模块切换"));
+      if (action === "switch-public") confirmAction("确认切换公版依赖仓库？", `将按 repos.yml 更新 ${demoRepos.length} 个仓库的分支或 Tag。`, "确认切换", () => simulateBatch("public", demoRepos, "公版仓库切换"));
+      if (action === "pull-public") confirmAction("拉取全部最新代码？", "将按 repos.yml 逐仓执行拉取，并展示成功、跳过和失败结果。", "开始拉取", () => simulateBatch("pull", demoRepos, "公版仓库拉取"), false);
+      if (action === "add-pair") { state.copyPairs += 1; renderPage(); }
+      if (action === "remove-pair") { if (state.copyPairs > 1) state.copyPairs -= 1; renderPage(); }
+      if (action === "browse-source" || action === "browse-target") {
+        const index = Number(button.dataset.index);
+        const input = document.getElementById(`${action === "browse-source" ? "source" : "target"}-${index}`);
+        if (input) input.value = `/workspace/Example_${action === "browse-source" ? "Source" : "Copy"}_${index + 1}`;
+        addLog("info", "已选择演示路径；没有访问本地文件系统");
+      }
+      if (action === "preview-copy") {
+        const oldPrefix = document.getElementById("old-prefix")?.value.trim() || "旧前缀";
+        const newPrefix = document.getElementById("new-prefix")?.value.trim() || "新前缀";
+        const paths = Array.from({ length: state.copyPairs }, (_, index) => ({
+          source: document.getElementById(`source-${index}`)?.value.trim() || "",
+          target: document.getElementById(`target-${index}`)?.value.trim() || ""
+        }));
+        if (paths.some(pair => !pair.source || !pair.target)) { showToast("请补全每组源目录和目标目录"); return; }
+        if (!oldPrefix || !newPrefix || oldPrefix === newPrefix) { showToast("请填写不同的旧前缀和新前缀"); return; }
+        const pathSummary = paths.map((pair, index) => `路径对 ${index + 1}：${pair.source} → ${pair.target}`).join("；");
+        confirmAction("确认复制并替换项目？", `${pathSummary}。将把“${oldPrefix}”替换为“${newPrefix}”。目标目录内的同名文件可能被覆盖；此原型不会写入文件。`, "开始模拟复制", runCopy);
+      }
+    });
+    document.getElementById("outcome-mode").addEventListener("change", event => {
+      state.mode = event.target.value;
+      addLog("info", `演示结果模式：${event.target.selectedOptions[0].textContent}`);
+    });
+    document.getElementById("log-clear").addEventListener("click", () => { state.logs = []; renderLogs(); showToast("日志已清空（演示）"); });
+    renderLogs();
+    renderPage();
+  </script>
+</body>
+</html>

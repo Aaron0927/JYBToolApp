@@ -11,7 +11,7 @@ import SwiftUI
 @Observable
 @MainActor
 final class ContentViewModel {
-    var selectedToolId: String?
+    var selectedToolId: String? = Tool.branchTool.id
     
     let tools: [Tool] = [
         .switchTool,

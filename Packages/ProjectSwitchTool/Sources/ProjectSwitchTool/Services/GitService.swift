@@ -8,7 +8,7 @@
 import Foundation
 import JYBLog
 
-public final class GitService {
+public final class GitService: Sendable {
     private let stashDir = ".gitswitcher-stash"
 
     public init() {}
@@ -23,7 +23,6 @@ public final class GitService {
         }
     }
 
-    @MainActor
     public func fetchBranches(repo: Repo) -> [String] {
         do {
             // 先 fetch 远程
@@ -37,12 +36,13 @@ public final class GitService {
                 .filter { !$0.isEmpty && !$0.contains("HEAD") }
             return Array(Set(branches)).sorted()
         } catch {
-            LogManager.shared.error("获取 \(repo.name) 分支列表失败: \(error.localizedDescription)")
+            Task { @MainActor in
+                LogManager.shared.error("获取 \(repo.name) 分支列表失败: \(error.localizedDescription)")
+            }
             return []
         }
     }
 
-    @MainActor
     public func readGitmodules(repo: Repo) -> [Submodule] {
         let gitmodulesPath = (repo.path as NSString).appendingPathComponent(".gitmodules")
         guard FileManager.default.fileExists(atPath: gitmodulesPath) else {
@@ -53,7 +53,9 @@ public final class GitService {
             let content = try String(contentsOfFile: gitmodulesPath, encoding: .utf8)
             return parseGitmodules(content: content, repoPath: repo.path)
         } catch {
-            LogManager.shared.error("读取 .gitmodules 失败: \(error.localizedDescription)")
+            Task { @MainActor in
+                LogManager.shared.error("读取 .gitmodules 失败: \(error.localizedDescription)")
+            }
             return []
         }
     }
@@ -129,7 +131,6 @@ public final class GitService {
         }
     }
 
-    @MainActor
     public func checkoutSubmodule(repo: Repo, submodule: Submodule) throws {
         let submodulePath = (repo.path as NSString).appendingPathComponent(submodule.path)
 
@@ -145,7 +146,9 @@ public final class GitService {
             // 更新完后再切换到目标分支（因为 update --init 可能不会切到最新分支）
             _ = try? ProcessRunner.run("git checkout \(submodule.targetBranch)", at: submodulePath)
         }
-        LogManager.shared.success("子模块 \(submodule.name) 切换到 \(submodule.targetBranch)")
+        Task { @MainActor in
+            LogManager.shared.success("子模块 \(submodule.name) 切换到 \(submodule.targetBranch)")
+        }
     }
 
     public func hasChanges(repo: Repo) -> Bool {
@@ -169,7 +172,6 @@ public final class GitService {
         _ = try ProcessRunner.run("git checkout -b \(branch)", at: repo.path)
     }
 
-    @MainActor
     public func pull(repo: Repo) throws {
         // 获取当前分支名
         let currentBranch = readCurrentBranch(repo: repo)
@@ -177,7 +179,9 @@ public final class GitService {
         // 检查远程是否存在该分支
         let remoteExists = try? ProcessRunner.run("git ls-remote --heads origin \(repo.targetBranch)", at: repo.path)
         if remoteExists?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-            LogManager.shared.info("\(repo.name) 是本地分支（远程不存在），跳过 pull")
+            Task { @MainActor in
+                LogManager.shared.info("\(repo.name) 是本地分支（远程不存在），跳过 pull")
+            }
             return
         }
 
@@ -199,7 +203,6 @@ public final class GitService {
         return FileManager.default.fileExists(atPath: stashPath)
     }
 
-    @MainActor
     public func saveStash(repo: Repo) throws {
         guard hasChanges(repo: repo) else { return }
 
@@ -225,11 +228,12 @@ public final class GitService {
             try stashContent.write(toFile: stashFilePath, atomically: true, encoding: .utf8)
             // 删除最新的 stash
             _ = try ProcessRunner.run("git stash drop", at: repo.path)
-            LogManager.shared.info("未提交的修改已保存到本地: \(stashFileName)")
+            Task { @MainActor in
+                LogManager.shared.info("未提交的修改已保存到本地: \(stashFileName)")
+            }
         }
     }
 
-    @MainActor
     public func restoreStash(repo: Repo) throws {
         let stashPath = (repo.path as NSString).appendingPathComponent(stashDir)
         let fileManager = FileManager.default
@@ -262,7 +266,9 @@ public final class GitService {
 
             // 删除 stash 文件
             try fileManager.removeItem(atPath: stashFilePath)
-            LogManager.shared.success("已恢复保存的修改: \(entry)")
+            Task { @MainActor in
+                LogManager.shared.success("已恢复保存的修改: \(entry)")
+            }
             break
         }
     }

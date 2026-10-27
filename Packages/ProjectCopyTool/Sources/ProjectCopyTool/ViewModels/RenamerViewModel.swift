@@ -14,6 +14,7 @@ public final class RenamerViewModel {
 
     public var isRunning: Bool = false
     public var isSuccess: Bool = false
+    public var errorMessage: String?
 
     public var stepStatuses: [String: StepStatus] = [:]
     public var result: RenameResult?
@@ -56,14 +57,34 @@ public final class RenamerViewModel {
         guard !sourceTargetPairs.isEmpty else { return false }
         let fileManager = FileManager.default
         return sourceTargetPairs.allSatisfy { pair in
-            !pair.sourcePath.isEmpty && 
-            !pair.targetPath.isEmpty &&
-            fileManager.fileExists(atPath: pair.sourcePath)
+            let sourcePath = pair.sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
+            let targetPath = pair.targetPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !sourcePath.isEmpty, !targetPath.isEmpty else { return false }
+
+            var sourceIsDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: sourcePath, isDirectory: &sourceIsDirectory),
+                  sourceIsDirectory.boolValue else { return false }
+
+            let sourceURL = URL(fileURLWithPath: sourcePath, isDirectory: true).standardizedFileURL
+            let targetURL = URL(fileURLWithPath: targetPath, isDirectory: true).standardizedFileURL
+            let sourceURLPath = sourceURL.path.hasSuffix("/") ? sourceURL.path : sourceURL.path + "/"
+            let targetURLPath = targetURL.path.hasSuffix("/") ? targetURL.path : targetURL.path + "/"
+            guard sourceURL != targetURL,
+                  !targetURL.path.hasPrefix(sourceURLPath),
+                  !sourceURL.path.hasPrefix(targetURLPath) else { return false }
+
+            var targetIsDirectory: ObjCBool = false
+            return !fileManager.fileExists(atPath: targetPath, isDirectory: &targetIsDirectory) || targetIsDirectory.boolValue
         }
     }
     
     public var canStart: Bool {
-        !sourceTargetPairs.isEmpty && !oldPrefix.isEmpty && !newPrefix.isEmpty && !isRunning && isValidPairs
+        !sourceTargetPairs.isEmpty &&
+          !oldPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+          !newPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+          oldPrefix.trimmingCharacters(in: .whitespacesAndNewlines) != newPrefix.trimmingCharacters(in: .whitespacesAndNewlines) &&
+          !isRunning &&
+          isValidPairs
     }
     
     public init() {}
@@ -107,8 +128,12 @@ public final class RenamerViewModel {
     }
     
     public func startRename() {
-        let filteredPairs = sourceTargetPairs.filter {
-            !$0.sourcePath.isEmpty && !$0.targetPath.isEmpty
+        let filteredPairs = sourceTargetPairs.map { pair in
+            SourceTargetPair(
+                id: pair.id,
+                sourcePath: pair.sourcePath.trimmingCharacters(in: .whitespacesAndNewlines),
+                targetPath: pair.targetPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
         }
 
         let config = RenamerConfig(
@@ -122,11 +147,14 @@ public final class RenamerViewModel {
         do {
             try config.validate()
         } catch {
+            errorMessage = error.localizedDescription
             LogManager.shared.error("配置验证失败: \(error.localizedDescription)")
             return
         }
 
         isRunning = true
+        errorMessage = nil
+        result = nil
         stepStatuses = [:]
 
         for step in steps {
@@ -135,31 +163,39 @@ public final class RenamerViewModel {
 
         LogManager.shared.info("开始复制项目...")
 
-        renameTask = Task { @MainActor in
-            let renamer = ProjectRenamer(config: config)
-
-            let renameResult = renamer.execute { [weak self] step, status in
-                Task { @MainActor in
-                    self?.stepStatuses[step] = status
-                    switch status {
-                    case .inProgress:
-                        LogManager.shared.info("执行中: \(step)")
-                    case .completed:
-                        LogManager.shared.success("完成: \(step)")
-                    case .failed(let error):
-                        LogManager.shared.error("失败: \(step) - \(error)")
-                    case .pending:
-                        break
+        renameTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let viewModel = self
+            let renameResult = await Task.detached(priority: .userInitiated) { [viewModel] in
+                let renamer = ProjectRenamer(config: config)
+                return renamer.execute { [viewModel] step, status in
+                    Task { @MainActor in
+                        viewModel.stepStatuses[step] = status
+                        switch status {
+                        case .inProgress:
+                            LogManager.shared.info("执行中: \(step)")
+                        case .completed:
+                            LogManager.shared.success("完成: \(step)")
+                        case .failed(let error):
+                            LogManager.shared.error("失败: \(step) - \(error)")
+                        case .pending:
+                            break
+                        }
                     }
                 }
-            }
+            }.value
 
             self.isRunning = false
             self.result = renameResult
             self.isSuccess = renameResult.success
 
             if renameResult.success {
-                LogManager.shared.success("项目复制成功！耗时: \(String(format: "%.2f", renameResult.duration))秒")
+                if self.autoOpenProject {
+                    for projectURL in config.projectURLs {
+                        NSWorkspace.shared.open(projectURL)
+                    }
+                }
+                LogManager.shared.success("项目复制成功！耗时: \(renameResult.duration.formatted(.number.precision(.fractionLength(2))))秒")
                 LogManager.shared.info("替换文件数: \(renameResult.filesReplaced), 重命名目录数: \(renameResult.directoriesRenamed), 重命名文件数: \(renameResult.filesRenamed)")
             } else {
                 LogManager.shared.error("项目复制失败: \(renameResult.errors.joined(separator: ", "))")
@@ -176,6 +212,7 @@ public final class RenamerViewModel {
         modifyConfigFiles = true
         isRunning = false
         isSuccess = false
+        errorMessage = nil
         stepStatuses = [:]
         result = nil
     }

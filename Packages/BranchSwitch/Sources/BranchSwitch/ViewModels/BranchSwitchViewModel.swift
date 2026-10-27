@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 import JYBLog
 
-public struct SubmoduleBranchInfo: Identifiable {
+public struct SubmoduleBranchInfo: Identifiable, Sendable {
     public let id: String
     public let name: String
     public let path: String
@@ -26,10 +26,14 @@ public final class BranchSwitchViewModel {
 
     public var repoPath: String = ""
     public var branches: [String] = []
+    public var currentBranch: String = ""
     public var selectedBranch: String = ""
     public var submoduleBranches: [SubmoduleBranchInfo] = []
     public var isLoading: Bool = false
     public var isConfirmEnabled: Bool = false
+    public var errorMessage: String?
+    public var operationSummary: String?
+    public var switchResults: [String: String] = [:]
 
     // 保存当前切换 Task 的引用，用于取消和超时处理
     private var currentSwitchTask: Task<Void, Never>?
@@ -77,6 +81,11 @@ public final class BranchSwitchViewModel {
 
         if panel.runModal() == .OK, let url = panel.url {
             repoPath = url.path
+            branches = []
+            currentBranch = ""
+            selectedBranch = ""
+            submoduleBranches = []
+            errorMessage = nil
             saveLastRepoPath()
             loadData()
         }
@@ -85,6 +94,7 @@ public final class BranchSwitchViewModel {
     public func loadData() {
         guard !repoPath.isEmpty else { return }
         isLoading = true
+        errorMessage = nil
 
         Task { @MainActor in
             await loadDataAsync()
@@ -133,6 +143,7 @@ public final class BranchSwitchViewModel {
         // 在主线程更新 UI
         if let result = result {
             branches = result.branches
+            currentBranch = result.currentBranch
 
             // 直接使用当前分支
             selectedBranch = result.currentBranch
@@ -142,6 +153,8 @@ public final class BranchSwitchViewModel {
             LogManager.shared.success("已加载 \(submoduleBranches.count) 个子模块")
             isConfirmEnabled = true
         } else {
+            currentBranch = ""
+            errorMessage = "无法读取仓库信息；请检查路径、Git 状态和子模块配置。"
             LogManager.shared.error("加载失败")
             isConfirmEnabled = false
         }
@@ -149,7 +162,7 @@ public final class BranchSwitchViewModel {
         saveLastRepoPath()
     }
 
-    private struct LoadResult {
+    private struct LoadResult: Sendable {
         let branches: [String]
         let currentBranch: String
         let submoduleBranches: [SubmoduleBranchInfo]
@@ -160,6 +173,9 @@ public final class BranchSwitchViewModel {
 
         currentSwitchTask?.cancel()
         isLoading = true
+        errorMessage = nil
+        operationSummary = nil
+        switchResults = [:]
         LogManager.shared.info("正在切换到分支 \(selectedBranch)...")
 
         let currentSelectedBranch = selectedBranch
@@ -231,7 +247,7 @@ public final class BranchSwitchViewModel {
 
             // 超时任务：120s 后抛错，解除 UI 阻塞
             group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                try await Task.sleep(for: .milliseconds(Int64(timeout * 1_000)))
                 throw ProcessRunnerError.executionFailed("操作超时 (\(Int(timeout))秒)")
             }
 
@@ -246,6 +262,19 @@ public final class BranchSwitchViewModel {
 
     @MainActor
     private func finishSwitchBranch(_ switchResult: SwitchResult) {
+        let failedSubmoduleCount = switchResult.submoduleResults.filter { !$0.success }.count
+        switchResults = Dictionary(uniqueKeysWithValues: switchResult.submoduleResults.map {
+            ($0.name, $0.success ? "成功" : "失败")
+        })
+        operationSummary = "主仓库：\(switchResult.success ? "成功" : "失败")；子模块：成功 \(switchResult.submoduleResults.count - failedSubmoduleCount)，失败 \(failedSubmoduleCount)"
+        if let error = switchResult.error {
+            errorMessage = error
+        } else if failedSubmoduleCount > 0 {
+            errorMessage = "主仓库已切换，但有 \(failedSubmoduleCount) 个子模块更新失败。请查看日志。"
+        } else {
+            errorMessage = nil
+        }
+
         // 在主线程更新 UI 和日志
         if switchResult.success {
             LogManager.shared.success("✓ 主仓库切换成功")
@@ -268,13 +297,13 @@ public final class BranchSwitchViewModel {
         currentSwitchTask = nil
     }
 
-    private struct SwitchResult {
+    private struct SwitchResult: Sendable {
         let success: Bool
         let submoduleResults: [SubmoduleSwitchResult]
         let error: String?
     }
 
-    private struct SubmoduleSwitchResult {
+    private struct SubmoduleSwitchResult: Sendable {
         let name: String
         let success: Bool
         let error: String?

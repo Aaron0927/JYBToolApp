@@ -34,10 +34,10 @@ public struct ProcessRunner: Sendable {
 
         process.currentDirectoryURL = URL(fileURLWithPath: path)
 
-        process.launchPath = "/bin/zsh"
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-c", command]
 
-        process.launch()
+        try process.run()
         process.waitUntilExit()
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()

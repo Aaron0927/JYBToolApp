@@ -4,7 +4,7 @@ import JYBLog
 struct LogPanelView: View {
     @State private var logManager = LogManager.shared
     @State private var dragOffset: CGFloat = 0
-    @GestureState private var isDragging = false
+    @State private var scrollPosition: UUID?
 
     private var currentHeight: CGFloat {
         if logManager.isExpanded {
@@ -18,6 +18,7 @@ struct LogPanelView: View {
             // 拖动把手
             DragHandle()
                 .gesture(dragGesture)
+                .accessibilityHidden(true)
 
             // 标题栏
             headerBar
@@ -44,14 +45,10 @@ struct LogPanelView: View {
                     logManager.isExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: logManager.isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("日志 (\(logManager.entries.count))")
-                        .font(.system(size: 12, weight: .medium))
-                }
+                Label("日志 · \(logManager.entries.count)", systemImage: logManager.isExpanded ? "chevron.down" : "chevron.right")
             }
             .buttonStyle(.plain)
+            .accessibilityHint(logManager.isExpanded ? "收起日志面板" : "展开日志面板")
 
             Spacer()
 
@@ -69,26 +66,35 @@ struct LogPanelView: View {
 
             Spacer()
 
-            // 清空按钮
-            Button {
-                logManager.clear()
-            } label: {
-                Text("清空")
-                    .font(.system(size: 11))
+            Button("增加日志高度", systemImage: "arrow.up.to.line") {
+                logManager.panelHeight = min(logManager.panelHeight + 40, logManager.maxHeight)
+                logManager.isExpanded = true
             }
-            .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
+            .help("增加日志面板高度")
+
+            Button("减少日志高度", systemImage: "arrow.down.to.line") {
+                logManager.panelHeight = max(logManager.panelHeight - 40, logManager.minHeight)
+            }
+            .labelStyle(.iconOnly)
+            .help("减少日志面板高度")
+
+            // 清空按钮
+            Button("清空日志", systemImage: "trash") {
+                logManager.clear()
+            }
+            .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
+            .disabled(logManager.entries.isEmpty)
 
             // 关闭按钮
-            Button {
+            Button("收起日志", systemImage: "xmark") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     logManager.isExpanded = false
                 }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
             }
             .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12)
@@ -96,32 +102,26 @@ struct LogPanelView: View {
     }
 
     private var logListView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(logManager.filteredEntries()) { entry in
-                        LogEntryRow(entry: entry)
-                            .id(entry.id)
-                    }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(logManager.filteredEntries()) { entry in
+                    LogEntryRow(entry: entry)
+                        .id(entry.id)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
             }
-            .onChange(of: logManager.entries.count) { _, _ in
-                if let lastEntry = logManager.entries.last {
-                    withAnimation {
-                        proxy.scrollTo(lastEntry.id, anchor: .bottom)
-                    }
-                }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+        }
+        .scrollPosition(id: $scrollPosition, anchor: .bottom)
+        .onChange(of: logManager.entries.count) { _, _ in
+            withAnimation {
+                scrollPosition = logManager.entries.last?.id
             }
         }
     }
 
     private var dragGesture: some Gesture {
         DragGesture()
-            .updating($isDragging) { _, state, _ in
-                state = true
-            }
             .onChanged { value in
                 if logManager.isExpanded {
                     dragOffset = -value.translation.height
@@ -147,7 +147,7 @@ struct DragHandle: View {
             .contentShape(Rectangle())
             .overlay(
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.secondary.opacity(0.3))
+                    .fill(.tertiary)
                     .frame(width: 36, height: 4)
             )
     }
@@ -159,24 +159,16 @@ struct FilterButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 2) {
-                Image(systemName: level.icon)
-                    .font(.system(size: 9))
-                Text(level.label)
-                    .font(.system(size: 10))
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+        Button(level.label, systemImage: level.icon, action: action)
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
             .background(isActive ? level.color.opacity(0.2) : Color.clear)
             .foregroundStyle(isActive ? level.color : .secondary)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(isActive ? level.color.opacity(0.5) : Color.clear, lineWidth: 1)
-            )
-        }
+            .clipShape(.rect(cornerRadius: 6))
         .buttonStyle(.plain)
+        .accessibilityLabel("筛选\(level.label)日志")
+        .accessibilityValue(isActive ? "已启用" : "已停用")
     }
 }
 
@@ -185,21 +177,24 @@ struct LogEntryRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Text("[\(entry.formattedTime)]")
-                .font(.system(size: 11, design: .monospaced))
+            Text(entry.formattedTime)
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
 
-            Text("[\(entry.level.label)]")
-                .font(.system(size: 11, weight: .medium))
+            Text(entry.level.label)
+                .font(.caption)
+                .bold()
                 .foregroundStyle(entry.level.color)
-                .frame(width: 40, alignment: .leading)
+                .frame(minWidth: 36, alignment: .leading)
 
             Text(entry.message)
-                .font(.system(size: 11))
+                .font(.caption)
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
         }
+        .accessibilityElement(children: .combine)
     }
 }

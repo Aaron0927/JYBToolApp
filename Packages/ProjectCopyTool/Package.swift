@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
@@ -8,9 +8,12 @@ let package = Package(
         .library(name: "ProjectCopyTool", targets: ["ProjectCopyTool"])
     ],
     dependencies: [
-        .package(name: "JYBLog", path: "../JYBLog")
+        .package(name: "JYBLog", path: "../JYBLog"),
+        .package(name: "ToolUI", path: "../ToolUI")
     ],
     targets: [
-        .target(name: "ProjectCopyTool", dependencies: ["JYBLog"])
-    ]
+        .target(name: "ProjectCopyTool", dependencies: ["JYBLog", "ToolUI"]),
+        .testTarget(name: "ProjectCopyToolTests", dependencies: ["ProjectCopyTool"])
+    ],
+    swiftLanguageModes: [.v6]
 )

@@ -1,6 +1,7 @@
 import Foundation
 
-public final class FileProcessor {
+// 计数状态和文件操作由单个 ProjectRenamer 后台任务串行访问。
+public final class FileProcessor: @unchecked Sendable {
     private let config: RenamerConfig
     private let fileManager = FileManager.default
     private var errors: [String] = []
@@ -24,7 +25,7 @@ public final class FileProcessor {
 
     private func replaceWithProtection(_ text: String, oldPrefix: String, newPrefix: String) -> String {
         guard !Constants.protectedKeywords.isEmpty else {
-            return text.replacingOccurrences(of: oldPrefix, with: newPrefix, options: .literal)
+            return text.replacing(oldPrefix, with: newPrefix)
         }
         
         var protectedRanges: [(Int, Int, String)] = []
@@ -51,11 +52,11 @@ public final class FileProcessor {
             offset += placeholder.count - keyword.count
         }
         
-        result = result.replacingOccurrences(of: oldPrefix, with: newPrefix, options: .literal)
+        result = result.replacing(oldPrefix, with: newPrefix)
         
         for keyword in Constants.protectedKeywords {
             let placeholder = "___PROTECTED_\(keyword.hashValue)___"
-            result = result.replacingOccurrences(of: placeholder, with: keyword)
+            result = result.replacing(placeholder, with: keyword)
         }
         
         return result

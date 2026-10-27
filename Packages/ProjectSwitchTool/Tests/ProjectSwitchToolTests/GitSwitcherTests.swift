@@ -62,7 +62,7 @@ final class RepoConfigTests: XCTestCase {
 
 @MainActor
 final class GitSwitcherViewModelTests: XCTestCase {
-    func testInitLoadsReposFromLastHistoryPath() throws {
+    func testInitLoadsReposFromLastHistoryPath() async throws {
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let configRepoURL = tempRoot.appendingPathComponent("config-repo")
         try FileManager.default.createDirectory(at: configRepoURL, withIntermediateDirectories: true)
@@ -80,7 +80,12 @@ final class GitSwitcherViewModelTests: XCTestCase {
         }
 
         let viewModel = GitSwitcherViewModel()
+        let deadline = Date().addingTimeInterval(5)
+        while viewModel.isLoadingWorkspace && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
 
+        XCTAssertFalse(viewModel.isLoadingWorkspace)
         XCTAssertEqual(viewModel.projectPath, configRepoURL.path)
         XCTAssertEqual(viewModel.configPath, configRepoURL.appendingPathComponent("repos.yaml").path)
         XCTAssertEqual(viewModel.repos.count, 2)

@@ -19,6 +19,7 @@
 		3BA5FD172F67EC8B006EFF57 /* ProjectCopyTool */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = ProjectCopyTool; sourceTree = "<group>"; };
 		3BA5FD1A2F67EDD7006EFF57 /* ProjectSwitchTool */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = ProjectSwitchTool; sourceTree = "<group>"; };
 		3BA5FDC22F68F558006EFF57 /* BranchSwitch */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = BranchSwitch; sourceTree = "<group>"; };
+		A1B2C3D4E5F6012345678901 /* ToolUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = ToolUI; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -82,6 +83,7 @@
 				3BA5FD1A2F67EDD7006EFF57 /* ProjectSwitchTool */,
 				3BA5FD172F67EC8B006EFF57 /* ProjectCopyTool */,
 				3BA5FDC22F68F558006EFF57 /* BranchSwitch */,
+				A1B2C3D4E5F6012345678901 /* ToolUI */,
 			);
 			path = Packages;
 			sourceTree = "<group>";
@@ -150,6 +152,9 @@
 			packageReferences = (
 				3BA5FDD72F68F558006EFF57 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				3B610D962F87871E0073F6FA /* XCLocalSwiftPackageReference "Packages/JYBLog" */,
+				A1B2C3D4E5F6012345678902 /* XCLocalSwiftPackageReference "Packages/ProjectCopyTool" */,
+				A1B2C3D4E5F6012345678903 /* XCLocalSwiftPackageReference "Packages/ProjectSwitchTool" */,
+				3BA5FDD32F68F558006EFF57 /* XCLocalSwiftPackageReference "Packages/BranchSwitch" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3BA5FCBD2F640351006EFF57 /* Products */;
@@ -332,7 +337,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
@@ -366,7 +371,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
@@ -398,13 +403,21 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/JYBLog;
 		};
+		A1B2C3D4E5F6012345678902 /* XCLocalSwiftPackageReference "Packages/ProjectCopyTool" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ProjectCopyTool;
+		};
+		A1B2C3D4E5F6012345678903 /* XCLocalSwiftPackageReference "Packages/ProjectSwitchTool" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ProjectSwitchTool;
+		};
+		3BA5FDD32F68F558006EFF57 /* XCLocalSwiftPackageReference "Packages/BranchSwitch" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/BranchSwitch;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		3BA5FDD32F68F558006EFF57 /* XCRemoteSwiftPackageReference "BranchSwitch" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "file:///Users/kim/Desktop/开发工具/JYBToolApp/Packages/BranchSwitch";
-		};
 		3BA5FDD72F68F558006EFF57 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -418,14 +431,17 @@
 /* Begin XCSwiftPackageProductDependency section */
 		3B610D972F87871E0073F6FA /* JYBLog */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = 3B610D962F87871E0073F6FA /* XCLocalSwiftPackageReference "Packages/JYBLog" */;
 			productName = JYBLog;
 		};
 		3BA5FD182F67EC93006EFF57 /* ProjectCopyTool */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F6012345678902 /* XCLocalSwiftPackageReference "Packages/ProjectCopyTool" */;
 			productName = ProjectCopyTool;
 		};
 		3BA5FD1B2F67EDE2006EFF57 /* ProjectSwitchTool */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F6012345678903 /* XCLocalSwiftPackageReference "Packages/ProjectSwitchTool" */;
 			productName = ProjectSwitchTool;
 		};
 		3BA5FDD12F68F558006EFF57 /* BranchSwitch */ = {

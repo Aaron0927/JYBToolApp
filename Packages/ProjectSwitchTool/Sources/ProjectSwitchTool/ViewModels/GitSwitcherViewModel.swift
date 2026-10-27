@@ -23,8 +23,12 @@ public final class GitSwitcherViewModel {
     public var pathHistory: [String] = []
     public var repos: [Repo] = []
     public var isWorking: Bool = false
+    public var isLoadingWorkspace: Bool = false
     public var isLoadingBranches: Bool = false
     public var switchCompleted: Bool = false
+    public var errorMessage: String?
+    public var operationSummary: String?
+    public var operationProgress: String?
 
     // 新增：分支选择相关
     public var selectedBranch: String = ""
@@ -35,6 +39,7 @@ public final class GitSwitcherViewModel {
     }
 
     private let service = GitService()
+    private var workspaceLoadID = UUID()
 
     public init() {
         // 加载路径历史
@@ -42,9 +47,8 @@ public final class GitSwitcherViewModel {
         // 加载上次选择的路径
         if let lastPath = pathHistory.first {
             projectPath = lastPath
-            configPath = configPath(for: lastPath)
-            repos = loadWorkspace(at: lastPath)
-            logReposStatus()
+            configPath = Self.configPath(for: lastPath)
+            loadWorkspace(at: lastPath)
         }
     }
 
@@ -68,34 +72,48 @@ public final class GitSwitcherViewModel {
         panel.directoryURL = pathHistory.first.flatMap { URL(fileURLWithPath: $0) } ?? .desktopDirectory
 
         if panel.runModal() == .OK {
-            let path = panel.url?.path ?? ""
+            guard let path = panel.url?.path else { return }
             selectPath(path)
         }
     }
 
     public func selectHistoryPath(_ path: String) {
+        errorMessage = nil
         projectPath = path
-        configPath = configPath(for: path)
+        configPath = Self.configPath(for: path)
         switchCompleted = false
-        repos = loadWorkspace(at: path)
-        logReposStatus()
+        loadWorkspace(at: path)
     }
 
     private func selectPath(_ path: String) {
+        errorMessage = nil
         projectPath = path
-        configPath = configPath(for: path)
+        configPath = Self.configPath(for: path)
         switchCompleted = false
         saveToHistory(path)
-        repos = loadWorkspace(at: path)
-        logReposStatus()
+        loadWorkspace(at: path)
     }
 
-    @discardableResult
-    private func loadWorkspace(at path: String) -> [Repo] {
-        let configPath = configPath(for: path)
-        self.configPath = configPath
-        guard let config = loadConfig(path: configPath) else { return [] }
-        return scanRepos(root: (path as NSString).deletingLastPathComponent, config: config)
+    private func loadWorkspace(at path: String) {
+        let loadID = UUID()
+        workspaceLoadID = loadID
+        isLoadingWorkspace = true
+        repos = []
+
+        let service = service
+        Task { @MainActor [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.readAndScanWorkspace(path: path, service: service)
+            }.value
+            guard let self, self.workspaceLoadID == loadID else { return }
+            self.repos = result.repos
+            self.errorMessage = result.error
+            self.isLoadingWorkspace = false
+            self.logReposStatus()
+            if let error = result.error {
+                LogManager.shared.error(error)
+            }
+        }
     }
 
     public func openInXcode() {
@@ -113,14 +131,39 @@ public final class GitSwitcherViewModel {
 
             let decoder = YAMLDecoder()
             let config = try decoder.decode(RepoConfig.self, from: yamlString)
+            errorMessage = nil
             return config
         } catch {
-            LogManager.shared.error("YAML 解析失败: \(error.localizedDescription)")
+            errorMessage = "YAML 解析失败：\(error.localizedDescription)"
+            LogManager.shared.error(errorMessage ?? "YAML 解析失败")
             return nil
         }
     }
 
     public func scanRepos(root: String, config: RepoConfig) -> [Repo] {
+        Self.scannedRepos(root: root, config: config, service: service)
+    }
+
+    nonisolated private static func readAndScanWorkspace(path: String, service: GitService) -> (repos: [Repo], error: String?) {
+        let configPath = Self.configPath(for: path)
+        let configText: String
+        do {
+            configText = try String(contentsOfFile: configPath, encoding: .utf8)
+        } catch {
+            return ([], "读取配置失败：\(error.localizedDescription)")
+        }
+
+        let config: RepoConfig
+        do {
+            config = try YAMLDecoder().decode(RepoConfig.self, from: configText)
+        } catch {
+            return ([], "YAML 解析失败：\(error.localizedDescription)")
+        }
+
+        return (scannedRepos(root: (path as NSString).deletingLastPathComponent, config: config, service: service), nil)
+    }
+
+    nonisolated private static func scannedRepos(root: String, config: RepoConfig, service: GitService) -> [Repo] {
         var scannedRepos: [Repo] = []
         for (name, branch) in config.repos {
             let repoPath = (root as NSString).appendingPathComponent(name)
@@ -160,215 +203,206 @@ public final class GitSwitcherViewModel {
 
     public func loadBranches(for repo: Repo) {
         isLoadingBranches = true
-        Task {
-            let branches = service.fetchBranches(repo: repo)
-            // 加载分支时同时读取 gitmodules 获取子模块信息
-            let submodules = service.readGitmodules(repo: repo)
-            await MainActor.run {
-                if let index = self.repos.firstIndex(where: { $0.id == repo.id }) {
-                    self.repos[index].branches = branches
-                    self.repos[index].submodules = submodules
-                }
-                self.isLoadingBranches = false
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let service = self.service
+            let result = await Task.detached(priority: .userInitiated) {
+                (service.fetchBranches(repo: repo), service.readGitmodules(repo: repo))
+            }.value
+            if let index = self.repos.firstIndex(where: { $0.id == repo.id }) {
+                self.repos[index].branches = result.0
+                self.repos[index].submodules = result.1
             }
+            self.isLoadingBranches = false
         }
     }
 
     public func loadSubmodules(for repo: Repo) {
-        Task {
-            let submodules = service.readGitmodules(repo: repo)
-            await MainActor.run {
-                if let index = self.repos.firstIndex(where: { $0.id == repo.id }) {
-                    self.repos[index].submodules = submodules
-                }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let service = self.service
+            let submodules = await Task.detached(priority: .userInitiated) {
+                service.readGitmodules(repo: repo)
+            }.value
+            if let index = self.repos.firstIndex(where: { $0.id == repo.id }) {
+                self.repos[index].submodules = submodules
             }
         }
     }
 
     public func switchBranch(for repo: Repo, to branch: String) {
         isWorking = true
+        operationSummary = nil
+        operationProgress = "正在切换 \(repo.name)…"
 
-        Task {
-            LogManager.shared.info("========== 开始切换分支 ==========")
-            LogManager.shared.info("仓库: \(repo.name)")
-            LogManager.shared.info("目标分支: \(branch)")
-
-            // 切换前记录子模块的当前分支
-            let oldSubmodules = service.readGitmodules(repo: repo)
-            var submoduleBeforeSwitch: [Submodule] = []
-            for oldSub in oldSubmodules {
-                submoduleBeforeSwitch.append(Submodule(
-                    name: oldSub.name,
-                    path: oldSub.path,
-                    currentBranch: oldSub.targetBranch,  // 切换前的分支
-                    targetBranch: oldSub.targetBranch
-                ))
-            }
-
-            do {
-                // 1. 检查并保存未提交的修改
-                if service.hasChanges(repo: repo) {
-                    LogManager.shared.info("检测到未提交改动，保存到本地...")
-                    try service.saveStash(repo: repo)
-                }
-
-                // 2. 切换主仓库分支
-                LogManager.shared.info("步骤 1: 切换主仓库到 \(branch)...")
-                try service.checkout(repo: repo, branch: branch)
-                LogManager.shared.info("主仓库切换完成")
-
-                // 3. 读取 gitmodules 获取切换后的子模块信息
-                LogManager.shared.info("步骤 2: 读取子模块信息...")
-                let newSubmodules = service.readGitmodules(repo: repo)
-
-                // 合并：currentBranch = 切换前的分支, targetBranch = 切换后的分支
-                var mergedSubmodules: [Submodule] = []
-                for newSub in newSubmodules {
-                    let oldBranch = submoduleBeforeSwitch.first(where: { $0.path == newSub.path })?.currentBranch ?? ""
-                    mergedSubmodules.append(Submodule(
-                        name: newSub.name,
-                        path: newSub.path,
-                        currentBranch: oldBranch,
-                        targetBranch: newSub.targetBranch
-                    ))
-                }
-
-                await MainActor.run {
-                    if let index = self.repos.firstIndex(where: { $0.id == repo.id }) {
-                        self.repos[index].submodules = mergedSubmodules
-                        self.repos[index].currentBranch = branch
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let service = self.service
+            let result = await Task.detached(priority: .userInitiated) { () -> (String, [Submodule], String?) in
+                var resultingSubmodules: [Submodule] = []
+                do {
+                    let oldSubmodules = service.readGitmodules(repo: repo)
+                    if service.hasChanges(repo: repo) {
+                        try service.saveStash(repo: repo)
                     }
-                }
 
-                if newSubmodules.isEmpty {
-                    LogManager.shared.info("无子模块")
-                } else {
-                    LogManager.shared.info("发现 \(newSubmodules.count) 个子模块")
+                    try service.checkout(repo: repo, branch: branch)
+                    let newSubmodules = service.readGitmodules(repo: repo)
+                    resultingSubmodules = newSubmodules.map { newSubmodule in
+                        let oldBranch = oldSubmodules.first(where: { $0.path == newSubmodule.path })?.currentBranch ?? ""
+                        return Submodule(
+                            id: newSubmodule.id,
+                            name: newSubmodule.name,
+                            path: newSubmodule.path,
+                            currentBranch: oldBranch,
+                            targetBranch: newSubmodule.targetBranch
+                        )
+                    }
 
-                    // 4. 切换子模块
                     for submodule in newSubmodules {
-                        LogManager.shared.info("步骤 3: 切换子模块 \(submodule.name) 到 \(submodule.targetBranch)...")
                         try service.checkoutSubmodule(repo: repo, submodule: submodule)
                     }
+                    try service.restoreStash(repo: repo)
+                    return (service.readCurrentBranch(repo: repo), resultingSubmodules, nil)
+                } catch {
+                    return (service.readCurrentBranch(repo: repo), resultingSubmodules, error.localizedDescription)
                 }
+            }.value
 
-                // 5. 尝试恢复 stash
-                LogManager.shared.info("步骤 4: 检查是否需要恢复保存的修改...")
-                try service.restoreStash(repo: repo)
-
-                LogManager.shared.success("========== 切换完成 ==========")
-            } catch {
-                LogManager.shared.error("切换失败: \(error.localizedDescription)")
+            if let index = self.repos.firstIndex(where: { $0.id == repo.id }) {
+                self.repos[index].currentBranch = result.0
+                self.repos[index].submodules = result.1
             }
-
-            await MainActor.run {
-                self.isWorking = false
+            self.operationProgress = nil
+            self.operationSummary = result.2.map { "切换失败：\($0)" } ?? "\(repo.name) 切换完成"
+            self.errorMessage = result.2
+            if let error = result.2 {
+                LogManager.shared.error("\(repo.name) 切换失败：\(error)")
+            } else {
+                LogManager.shared.success("\(repo.name) 已切换到 \(branch)")
             }
+            self.isWorking = false
         }
     }
 
     public func switchSubmoduleBranch(for repo: Repo, submodule: Submodule) {
         isWorking = true
 
-        Task {
-            do {
-                try service.checkoutSubmodule(repo: repo, submodule: submodule)
-                await MainActor.run {
-                    if let repoIndex = self.repos.firstIndex(where: { $0.id == repo.id }) {
-                        if let submoduleIndex = self.repos[repoIndex].submodules.firstIndex(where: { $0.id == submodule.id }) {
-                            self.repos[repoIndex].submodules[submoduleIndex].currentBranch = submodule.targetBranch
-                        }
-                    }
-                    self.isWorking = false
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let service = self.service
+            let errorMessage = await Task.detached(priority: .userInitiated) { () -> String? in
+                do {
+                    try service.checkoutSubmodule(repo: repo, submodule: submodule)
+                    return nil
+                } catch {
+                    return error.localizedDescription
                 }
-            } catch {
-                LogManager.shared.error("子模块切换失败: \(error.localizedDescription)")
-                await MainActor.run {
-                    self.isWorking = false
-                }
+            }.value
+
+            if let repoIndex = self.repos.firstIndex(where: { $0.id == repo.id }), errorMessage == nil,
+               let submoduleIndex = self.repos[repoIndex].submodules.firstIndex(where: { $0.id == submodule.id }) {
+                self.repos[repoIndex].submodules[submoduleIndex].currentBranch = submodule.targetBranch
             }
+            if let errorMessage {
+                LogManager.shared.error("子模块切换失败: \(errorMessage)")
+            }
+            self.isWorking = false
         }
     }
 
     // MARK: - 旧版切换（保留兼容性）
 
     public func switchWorkspace() {
-        let currentRepos = repos
+        let currentRepos = repos.map { repo -> Repo in
+            var updated = repo
+            updated.operationStatus = nil
+            updated.operationDetail = nil
+            return updated
+        }
+        repos = currentRepos
         isWorking = true
         switchCompleted = false
 
-        Task {
-            LogManager.shared.info("========== 开始切换分支 ==========")
-            LogManager.shared.info("共 \(currentRepos.count) 个仓库待处理")
+        operationSummary = nil
+        errorMessage = nil
+        LogManager.shared.info("========== 开始切换分支，共 \(currentRepos.count) 个仓库 ==========")
 
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let service = self.service
+            var updatedRepos: [Repo] = []
             var successCount = 0
             var skipCount = 0
             var failCount = 0
 
-            for (index, repo) in currentRepos.enumerated() {
-                LogManager.shared.info("[\(index + 1)/\(currentRepos.count)] 正在处理: \(repo.name)")
-                LogManager.shared.info("  目标路径: \(repo.path)")
-                LogManager.shared.info("  当前分支: \(repo.currentBranch) -> 目标分支: \(repo.targetBranch)")
+            for (index, originalRepo) in currentRepos.enumerated() {
+                var repo = originalRepo
+                self.operationProgress = "正在处理 \(index + 1)/\(currentRepos.count)：\(repo.name)"
+                LogManager.shared.info("[\(index + 1)/\(currentRepos.count)] \(repo.name)：\(repo.currentBranch) → \(repo.targetBranch)")
 
                 if !repo.isAvailable {
-                    LogManager.shared.error("  结果: 跳过（目标路径不是 Git 仓库）")
-                    failCount += 1
-                    continue
-                }
-
-                if repo.currentBranch == repo.targetBranch {
-                    LogManager.shared.success("[\(index + 1)] \(repo.name) 已在目标分支，无需切换")
+                    repo.operationStatus = "跳过"
+                    repo.operationDetail = "目标路径不是可用的 Git 仓库。"
                     skipCount += 1
-                    continue
-                }
+                } else if repo.currentBranch == repo.targetBranch {
+                    repo.operationStatus = "跳过"
+                    repo.operationDetail = "已经位于目标分支。"
+                    skipCount += 1
+                } else {
+                    repo = await Task.detached(priority: .userInitiated) { [service, repo] in
+                        var updatedRepo = repo
+                        do {
+                            if service.hasChanges(repo: repo) {
+                                try service.saveStash(repo: repo)
+                            }
+                            try service.checkout(repo: repo, branch: repo.targetBranch)
+                            try service.pull(repo: repo)
+                            try service.restoreStash(repo: repo)
+                            updatedRepo.operationStatus = "成功"
+                            updatedRepo.operationDetail = nil
+                        } catch {
+                            updatedRepo.operationStatus = "失败"
+                            updatedRepo.operationDetail = error.localizedDescription
+                        }
+                        updatedRepo.currentBranch = service.readCurrentBranch(repo: repo)
+                        updatedRepo.hasStash = service.hasSavedStash(repo: repo)
+                        return updatedRepo
+                    }.value
 
-                do {
-                    if service.hasChanges(repo: repo) {
-                        LogManager.shared.info("  步骤: 检测到未提交改动，执行 stash...")
-                        try service.saveStash(repo: repo)
-                        LogManager.shared.warning("  stash 已保存到本地")
+                    if repo.operationStatus == "成功" {
+                        successCount += 1
+                        LogManager.shared.success("[\(index + 1)] \(repo.name) 切换成功")
+                    } else {
+                        failCount += 1
+                        LogManager.shared.error("[\(index + 1)] \(repo.name) 切换失败：\(repo.operationDetail ?? "未知错误")")
                     }
+                }
 
-                    LogManager.shared.info("  步骤: 切换到 \(repo.targetBranch)...")
-                    try service.checkout(repo: repo, branch: repo.targetBranch)
-                    LogManager.shared.info("  checkout 完成")
-
-                    LogManager.shared.info("  步骤: 拉取远程更新...")
-                    try service.pull(repo: repo)
-                    LogManager.shared.info("  pull 完成")
-
-                    // 恢复 stash
-                    try service.restoreStash(repo: repo)
-
-                    LogManager.shared.success("[\(index + 1)] \(repo.name) 切换成功")
-                    successCount += 1
-                } catch {
-                    LogManager.shared.error("[\(index + 1)] \(repo.name) 切换失败: \(error.localizedDescription)")
-                    failCount += 1
+                updatedRepos.append(repo)
+                if repo.operationStatus == "跳过" {
+                    LogManager.shared.warning("[\(index + 1)] \(repo.name) 已跳过：\(repo.operationDetail ?? "")")
+                }
+                if let repositoryIndex = self.repos.firstIndex(where: { $0.id == repo.id }) {
+                    self.repos[repositoryIndex] = repo
                 }
             }
 
-            if failCount == 0 {
-                LogManager.shared.success("========== 私版券商切换成功 ==========")
-                LogManager.shared.success("成功: \(successCount), 已是目标分支: \(skipCount), 失败: 0")
-            } else {
-                LogManager.shared.error("========== 私版券商切换完成，失败 \(failCount) 个 ==========")
-                LogManager.shared.info("成功: \(successCount), 已是目标分支: \(skipCount), 失败: \(failCount)")
-            }
-
-            await MainActor.run {
-                self.repos = self.loadWorkspace(at: self.projectPath)
-                self.isWorking = false
-                self.switchCompleted = true
-            }
+            self.repos = updatedRepos
+            self.operationProgress = nil
+            self.operationSummary = "切换结果：成功 \(successCount)，跳过 \(skipCount)，失败 \(failCount)"
+            self.errorMessage = failCount > 0 ? "有 \(failCount) 个仓库切换失败，请查看逐仓结果和日志。" : nil
+            self.isWorking = false
+            self.switchCompleted = true
+            LogManager.shared.info("========== \(self.operationSummary ?? "切换完成") ==========")
         }
     }
 
-    private func configPath(for path: String) -> String {
+    nonisolated private static func configPath(for path: String) -> String {
         (path as NSString).appendingPathComponent("repos.yaml")
     }
 
-    private func isGitRepository(at path: String) -> Bool {
+    nonisolated private static func isGitRepository(at path: String) -> Bool {
         let fileManager = FileManager.default
         let gitPath = (path as NSString).appendingPathComponent(".git")
         if fileManager.fileExists(atPath: gitPath) {

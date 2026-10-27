@@ -5,10 +5,12 @@
 //  Created by kim on 2026/4/21.
 //
 
-import Combine
+import Observation
 import Sparkle
 
-final class UpdaterController: ObservableObject {
+@Observable
+@MainActor
+final class UpdaterController {
     private let updaterController: SPUStandardUpdaterController
     
     init() {

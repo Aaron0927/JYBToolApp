@@ -1,6 +1,6 @@
 import Foundation
 
-public struct SourceTargetPair: Identifiable {
+public struct SourceTargetPair: Identifiable, Sendable {
     public let id: UUID
     public var sourcePath: String
     public var targetPath: String
@@ -12,7 +12,7 @@ public struct SourceTargetPair: Identifiable {
     }
 }
 
-public struct RenamerConfig {
+public struct RenamerConfig: Sendable {
     public let sourceTargetPairs: [SourceTargetPair]
     public let oldPrefix: String
     public let newPrefix: String
@@ -65,6 +65,27 @@ public struct RenamerConfig {
             guard fileManager.fileExists(atPath: sourcePath, isDirectory: &isDirectory),
                   isDirectory.boolValue else {
                 throw RenamerError.sourceNotDirectory(sourcePath)
+            }
+
+            guard !targetPath.isEmpty else {
+                throw RenamerError.targetPathEmpty
+            }
+
+            let sourceURL = URL(fileURLWithPath: sourcePath, isDirectory: true).standardizedFileURL
+            let targetURL = URL(fileURLWithPath: targetPath, isDirectory: true).standardizedFileURL
+            let sourceURLPath = sourceURL.path.hasSuffix("/") ? sourceURL.path : sourceURL.path + "/"
+            let targetURLPath = targetURL.path.hasSuffix("/") ? targetURL.path : targetURL.path + "/"
+
+            guard sourceURL != targetURL,
+                  !targetURL.path.hasPrefix(sourceURLPath),
+                  !sourceURL.path.hasPrefix(targetURLPath) else {
+                throw RenamerError.pathsOverlap(sourcePath, targetPath)
+            }
+
+            var targetIsDirectory: ObjCBool = false
+            if fileManager.fileExists(atPath: targetPath, isDirectory: &targetIsDirectory),
+               !targetIsDirectory.boolValue {
+                throw RenamerError.targetNotDirectory(targetPath)
             }
         }
 

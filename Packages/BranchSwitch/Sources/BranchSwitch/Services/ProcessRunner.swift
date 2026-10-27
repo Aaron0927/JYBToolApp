@@ -19,6 +19,23 @@ public enum ProcessRunnerError: Error, LocalizedError, Sendable {
 public struct ProcessRunner: Sendable {
     public init() {}
 
+    private final class CompletionState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var finished = false
+
+        var isFinished: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return finished
+        }
+
+        func markFinished() {
+            lock.lock()
+            finished = true
+            lock.unlock()
+        }
+    }
+
     /// 超时时间（秒），默认 60 秒
     private static let defaultTimeout: TimeInterval = 60
 
@@ -31,7 +48,7 @@ public struct ProcessRunner: Sendable {
         process.standardOutput = pipe
         process.standardError = errorPipe
         process.currentDirectoryURL = URL(fileURLWithPath: path)
-        process.launchPath = "/bin/zsh"
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-c", command]
 
         do {
@@ -43,31 +60,23 @@ public struct ProcessRunner: Sendable {
         // 使用超时机制等待进程完成
         let deadline = DispatchTime.now() + effectiveTimeout
 
-        var processFinished = false
-        let lock = NSLock()
+        let completion = CompletionState()
 
         // 在后台线程等待进程
         Thread {
             process.waitUntilExit()
-            lock.lock()
-            processFinished = true
-            lock.unlock()
+            completion.markFinished()
         }.start()
 
         // 等待直到完成或超时
-        lock.lock()
-        while !processFinished {
-            lock.unlock()
-            Thread.sleep(forTimeInterval: 0.1)
+        while !completion.isFinished {
             let now = DispatchTime.now()
             if now >= deadline {
-                lock.unlock()
                 process.interrupt()
                 throw ProcessRunnerError.executionFailed("命令执行超时 (\(Int(effectiveTimeout))秒): \(command)")
             }
-            lock.lock()
+            Thread.sleep(forTimeInterval: 0.1)
         }
-        lock.unlock()
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()

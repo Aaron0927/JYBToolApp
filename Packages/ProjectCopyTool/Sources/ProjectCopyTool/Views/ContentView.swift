@@ -1,98 +1,68 @@
-import SwiftUI
 import AppKit
+import SwiftUI
+import ToolUI
 
 public struct ContentView: View {
-    @State private var viewModel = RenamerViewModel()
-    
-    public init() {}
-    
-    public var body: some View {
-        VStack(spacing: 0) {
-            headerView
+  @State private var viewModel = RenamerViewModel()
 
-            Divider()
+  public init() {}
 
-            if viewModel.isRunning {
-                RenameProgressView(viewModel: viewModel)
-            } else {
-                ConfigFormView(viewModel: viewModel)
-            }
+  public var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .top) {
+        ToolPageHeader(
+          title: "私版项目复制",
+          subtitle: "复制项目目录并按配置替换代码、文件名和项目设置。",
+          systemImage: "doc.on.doc"
+        )
 
-            Divider()
-
-            footerView
+        Button("在 Xcode 中打开", systemImage: "hammer") {
+          openInXcode()
         }
-        .frame(minWidth: 500, minHeight: 400)
+        .disabled(!hasWorkspace || viewModel.isRunning)
+      }
+
+      if viewModel.isRunning {
+        RenameProgressView(viewModel: viewModel)
+      } else {
+        ConfigFormView(viewModel: viewModel)
+      }
+
+      Label(
+        "受保护关键词：\(Constants.protectedKeywords.joined(separator: "、"))",
+        systemImage: "lock.shield"
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .textSelection(.enabled)
     }
-    
-    private var headerView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "doc.on.doc.fill")
-                    .font(.title)
-                    .foregroundStyle(.blue)
-                Text("私版项目复制")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Spacer()
+    .padding()
+    .frame(minWidth: 640, minHeight: 480)
+  }
 
-                Button("在 Xcode 中打开") {
-                    openInXcode()
-                }
-                .disabled(!hasWorkspace || viewModel.isRunning)
-                .opacity(hasWorkspace ? 1 : 0.5)
-            }
-
-            Text("复制并重命名指定路径项目，支持批量替换前缀、文件内容、plist 等")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .padding()
-        .background(Color(NSColor.windowBackgroundColor))
-        .clipShape(.rect(cornerRadius: 8))
+  private var hasWorkspace: Bool {
+    for pair in viewModel.sourceTargetPairs where !pair.targetPath.isEmpty {
+      let url = URL(fileURLWithPath: pair.targetPath)
+      guard let matches = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else {
+        continue
+      }
+      if matches.contains(where: { $0.pathExtension == "xcworkspace" || $0.pathExtension == "xcodeproj" }) {
+        return true
+      }
     }
+    return false
+  }
 
-    private var hasWorkspace: Bool {
-        for pair in viewModel.sourceTargetPairs where !pair.targetPath.isEmpty {
-            let url = URL(fileURLWithPath: pair.targetPath)
-            let fileManager = FileManager.default
-
-            if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
-               matches.contains(where: { $0.pathExtension == "xcworkspace" || $0.pathExtension == "xcodeproj" }) {
-                return true
-            }
-        }
-        return false
+  private func openInXcode() {
+    for pair in viewModel.sourceTargetPairs where !pair.targetPath.isEmpty {
+      let url = URL(fileURLWithPath: pair.targetPath)
+      guard let matches = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else {
+        continue
+      }
+      if let project = matches.first(where: { $0.pathExtension == "xcworkspace" || $0.pathExtension == "xcodeproj" }) {
+        NSWorkspace.shared.openApplication(at: project, configuration: NSWorkspace.OpenConfiguration())
+        return
+      }
     }
-
-    private func openInXcode() {
-        for pair in viewModel.sourceTargetPairs where !pair.targetPath.isEmpty {
-            let url = URL(fileURLWithPath: pair.targetPath)
-            let fileManager = FileManager.default
-
-            if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
-               let workspace = matches.first(where: { $0.pathExtension == "xcworkspace" }) {
-                NSWorkspace.shared.openApplication(at: workspace, configuration: NSWorkspace.OpenConfiguration())
-                return
-            }
-
-            if let matches = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
-               let project = matches.first(where: { $0.pathExtension == "xcodeproj" }) {
-                NSWorkspace.shared.openApplication(at: project, configuration: NSWorkspace.OpenConfiguration())
-                return
-            }
-        }
-    }
-
-    private var footerView: some View {
-        HStack {
-            Text("保护关键词: \(Constants.protectedKeywords.joined(separator: ", "))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color(NSColor.windowBackgroundColor))
-    }
+  }
 }

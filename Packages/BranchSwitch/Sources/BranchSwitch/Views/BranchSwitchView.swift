@@ -1,124 +1,140 @@
 import SwiftUI
+import ToolUI
 
 public struct BranchSwitchView: View {
-    @Bindable var viewModel: BranchSwitchViewModel
+  @Bindable var viewModel: BranchSwitchViewModel
+  @State private var isConfirmingSwitch = false
 
-    public init(viewModel: BranchSwitchViewModel) {
-        self.viewModel = viewModel
-    }
+  public init(viewModel: BranchSwitchViewModel) {
+    self.viewModel = viewModel
+  }
 
-    public var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // 标题栏
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.title)
-                        .foregroundStyle(.blue)
-                    Text("主仓库子模块切换")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    Spacer()
-                }
+  public var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      ToolPageHeader(
+        title: "主仓库子模块切换",
+        subtitle: "选择主仓库分支，查看子模块目标后再执行同步。",
+        systemImage: "arrow.triangle.branch"
+      )
 
-                Text("选择一个主仓库分支，确认后自动更新所有子模块到各自预定的分支")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding()
-            .background(Color(NSColor.windowBackgroundColor))
-            .clipShape(.rect(cornerRadius: 8))
+      ToolPanel("主仓库", systemImage: "folder") {
+        HStack {
+          TextField("请选择仓库目录", text: $viewModel.repoPath)
+            .disabled(true)
+            .accessibilityLabel("主仓库路径")
 
-            // 仓库选择区
-            HStack {
-                Text("仓库路径：")
-                    .frame(width: 80, alignment: .trailing)
+          Button("浏览…", systemImage: "folder") {
+            viewModel.selectRepository()
+          }
+          .disabled(viewModel.isLoading)
 
-                HStack(spacing: 8) {
-                    TextField("请选择仓库目录", text: $viewModel.repoPath)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(true)
-
-                    Button("浏览...") {
-                        viewModel.selectRepository()
-                    }
-                    .disabled(viewModel.isLoading)
-
-                    Button("在 Xcode 中打开") {
-                        viewModel.openInXcode()
-                    }
-                    .disabled(!viewModel.hasWorkspace || viewModel.isLoading)
-                    .opacity(viewModel.hasWorkspace ? 1 : 0.5)
-                }
-
-                if viewModel.isLoading {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                }
-            }
-            .padding(.horizontal)
-
-            // 分支选择
-            if !viewModel.repoPath.isEmpty && !viewModel.branches.isEmpty {
-                HStack {
-                    Text("分支：")
-                        .frame(width: 80, alignment: .trailing)
-
-                    Picker("", selection: $viewModel.selectedBranch) {
-                        ForEach(viewModel.branches, id: \.self) { branch in
-                            Text(branch).tag(branch)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-
-                    Spacer()
-                }
-                .padding(.horizontal)
-            }
-
-            Divider()
-
-            // 子模块分支
-            if !viewModel.repoPath.isEmpty && !viewModel.submoduleBranches.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("子模块分支")
-                        .font(.headline)
-
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(viewModel.submoduleBranches) { info in
-                                HStack {
-                                    Text(info.name)
-                                    Text(info.targetBranch)
-                                        .foregroundStyle(.blue)
-                                    Spacer()
-                                }
-                                .font(.system(.body, design: .monospaced))
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                    }
-                    .frame(maxHeight: 200)
-                    .background(Color.black.opacity(0.05))
-                    .clipShape(.rect(cornerRadius: 8))
-
-                    HStack {
-                        Spacer()
-                        Button("确认切换") {
-                            viewModel.switchBranch()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!viewModel.isConfirmEnabled || viewModel.isLoading)
-                    }
-                }
-                .padding(.horizontal)
-            }
-
-            Spacer()
+          Button("在 Xcode 中打开", systemImage: "hammer") {
+            viewModel.openInXcode()
+          }
+          .disabled(!viewModel.hasWorkspace || viewModel.isLoading)
         }
-        .padding(.vertical)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        if !viewModel.branches.isEmpty {
+          Picker("主仓库分支", selection: $viewModel.selectedBranch) {
+            ForEach(viewModel.branches, id: \.self) { branch in
+              Text(branch).tag(branch)
+            }
+          }
+          .pickerStyle(.menu)
+          if !viewModel.currentBranch.isEmpty {
+            ToolStatusBadge("当前分支：\(viewModel.currentBranch)")
+          }
+        }
+
+        if viewModel.isLoading {
+          ProgressView("正在读取仓库…")
+            .controlSize(.small)
+        } else if let errorMessage = viewModel.errorMessage {
+          Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(.red)
+            .accessibilityAddTraits(.updatesFrequently)
+        } else if viewModel.repoPath.isEmpty {
+          ContentUnavailableView(
+            "请选择主仓库",
+            systemImage: "folder.badge.questionmark",
+            description: Text("读取本地分支和子模块配置后，可预览同步目标。")
+          )
+          .frame(minHeight: 140)
+        } else if viewModel.branches.isEmpty {
+          ContentUnavailableView(
+            "未读取到分支",
+            systemImage: "exclamationmark.triangle",
+            description: Text("检查路径是否为有效 Git 仓库，然后重新选择目录。")
+          )
+          .frame(minHeight: 140)
+        }
+      }
+
+      if !viewModel.submoduleBranches.isEmpty {
+        ToolPanel("子模块目标预览", systemImage: "arrow.triangle.branch") {
+          Text("切换后将按所选主仓库分支中的配置更新子模块。")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+
+          if let operationSummary = viewModel.operationSummary {
+            ToolStatusBadge(operationSummary, kind: viewModel.errorMessage == nil ? .success : .warning)
+          }
+
+          ForEach(viewModel.submoduleBranches) { info in
+            LabeledContent(info.name) {
+              HStack(spacing: 8) {
+                Text(info.currentBranch)
+                  .foregroundStyle(.secondary)
+                Image(systemName: "arrow.right")
+                  .foregroundStyle(.tertiary)
+                  .accessibilityHidden(true)
+                Text(info.targetBranch)
+                  .foregroundStyle(.tint)
+              }
+              .font(.system(.body, design: .monospaced))
+              .textSelection(.enabled)
+            }
+            if let result = viewModel.switchResults[info.name] {
+              ToolStatusBadge(result, kind: result == "成功" ? .success : .failure)
+            }
+          }
+
+          HStack {
+            if viewModel.isLoading {
+              ProgressView()
+                .controlSize(.small)
+            }
+            Spacer()
+            Button("确认切换", systemImage: "arrow.triangle.branch") {
+              isConfirmingSwitch = true
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!viewModel.isConfirmEnabled || viewModel.isLoading)
+          }
+        }
+      }
+
+      if let errorMessage = viewModel.errorMessage, !viewModel.submoduleBranches.isEmpty {
+        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+          .foregroundStyle(.red)
+          .accessibilityAddTraits(.updatesFrequently)
+      }
+
+      Spacer(minLength: 0)
     }
+    .padding()
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .confirmationDialog(
+      "确认切换主仓库和子模块？",
+      isPresented: $isConfirmingSwitch,
+      titleVisibility: .visible
+    ) {
+      Button("切换到 \(viewModel.selectedBranch)", role: .destructive) {
+        viewModel.switchBranch()
+      }
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("主仓库工作区可能包含未提交修改。请先确认这些修改已提交或妥善保存。")
+    }
+  }
 }

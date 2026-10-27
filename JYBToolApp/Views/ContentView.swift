@@ -17,47 +17,48 @@ struct ContentView: View {
     @State private var reposSwitchViewModel = BranchSwitch.ReposSwitchViewModel()
 
     var body: some View {
-        VStack(spacing: 0) {
-            NavigationSplitView {
-            List(selection: $viewModel.selectedToolId) {
-                ForEach(viewModel.sortedCategories, id: \.self) { category in
-                    Section(category) {
-                        ForEach(viewModel.groupedTools[category] ?? []) { tool in
-                            Label(tool.name, systemImage: tool.icon)
-                                .tag(tool.id)
-                        }
-                    }
-                }
+    VStack(spacing: 0) {
+      NavigationSplitView {
+        List(selection: $viewModel.selectedToolId) {
+          ForEach(viewModel.sortedCategories, id: \.self) { category in
+            Section(category) {
+              ForEach(viewModel.groupedTools[category] ?? []) { tool in
+                Label(tool.name, systemImage: tool.icon)
+                  .tag(tool.id)
+                  .accessibilityIdentifier("tool-\(tool.id)")
+              }
             }
-            .navigationTitle("工具箱")
-            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
-
-        } detail: {
-            if let tool = viewModel.selectedTool {
-                switch tool.id {
-                case "switch":
-                    ProjectSwitchTool.GitSwitcherView()
-
-                case "copy":
-                    ProjectCopyTool.ContentView()
-
-                case "branch":
-                    BranchSwitchView(viewModel: branchSwitchViewModel)
-
-                case "reposBranch":
-                    ReposSwitchView(viewModel: reposSwitchViewModel)
-
-                default:
-                    Text("未知工具")
-                }
-            } else {
-                Text("请选择一个工具")
-                    .foregroundStyle(.secondary)
+          }
+        }
+        .listStyle(.sidebar)
+        .navigationTitle("JYBToolApp")
+        .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 270)
+      } detail: {
+        Group {
+          if let tool = viewModel.selectedTool {
+            switch tool.id {
+            case Tool.switchTool.id:
+              ProjectSwitchTool.GitSwitcherView()
+            case Tool.copyTool.id:
+              ProjectCopyTool.ContentView()
+            case Tool.branchTool.id:
+              BranchSwitchView(viewModel: branchSwitchViewModel)
+            case Tool.reposBranchTool.id:
+              ReposSwitchView(viewModel: reposSwitchViewModel)
+            default:
+              ContentUnavailableView("找不到工具", systemImage: "questionmark.folder")
             }
+          } else {
+            ContentUnavailableView("请选择一个工具", systemImage: "sidebar.left")
+          }
         }
-        .frame(minWidth: 700, minHeight: 500)
-            LogPanelView()
-        }
+        .frame(minWidth: 470, minHeight: 420)
+      }
+      .navigationSplitViewStyle(.balanced)
+
+      LogPanelView()
+    }
+    .frame(minWidth: 740, minHeight: 560)
     }
 }
 

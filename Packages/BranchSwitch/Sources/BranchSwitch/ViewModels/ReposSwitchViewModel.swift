@@ -25,6 +25,9 @@ public final class ReposSwitchViewModel {
   public var isPulling = false
   public var isConfirmEnabled = false
   public var pullSummary: String?
+  public var operationSummary: String?
+  public var operationResults: [String: String] = [:]
+  public var operationDetails: [String: String] = [:]
 
   private let service = ReposYAMLService()
   private var currentTask: Task<Void, Never>?
@@ -152,6 +155,9 @@ public final class ReposSwitchViewModel {
     currentTask?.cancel()
     isSwitching = true
     isConfirmEnabled = false
+    operationSummary = nil
+    operationResults = [:]
+    operationDetails = [:]
     LogManager.shared.info("========== 开始公版配置切换 ==========")
     LogManager.shared.info("依赖仓库并发切换，最大并发数: \(Self.maxConcurrentRepoSwitchCount)")
 
@@ -232,6 +238,9 @@ public final class ReposSwitchViewModel {
     currentTask?.cancel()
     isPulling = true
     pullSummary = nil
+    operationSummary = nil
+    operationResults = [:]
+    operationDetails = [:]
     LogManager.shared.info("========== 开始拉取公版全部仓库 ==========")
 
     let currentProjectPath = projectPath
@@ -327,6 +336,13 @@ public final class ReposSwitchViewModel {
   }
 
   private func finishSwitch(_ results: [RepoSwitchResult]) {
+    let successCount = results.filter(\.success).count
+    let failedResults = results.filter { !$0.success }
+    operationResults = Dictionary(uniqueKeysWithValues: results.map { ($0.name, $0.success ? "成功" : "失败") })
+    operationDetails = Dictionary(uniqueKeysWithValues: failedResults.compactMap { result in
+      result.error.map { (result.name, $0) }
+    })
+
     for result in results {
       if result.success {
         LogManager.shared.success("✓ \(result.name) 切换成功")
@@ -336,6 +352,7 @@ public final class ReposSwitchViewModel {
     }
 
     let failedCount = results.filter { !$0.success }.count
+    operationSummary = "切换结果：成功 \(successCount)，失败 \(failedCount)"
     if failedCount == 0 {
       LogManager.shared.success("========== 公版配置切换完成 ==========")
     } else {
@@ -356,9 +373,23 @@ public final class ReposSwitchViewModel {
 
     if let error = result.error {
       pullSummary = "拉取失败：\(error)"
+      operationSummary = pullSummary
       LogManager.shared.error("========== 拉取失败：\(error) ==========")
       return
     }
+
+    operationResults = Dictionary(uniqueKeysWithValues: result.results.map { result in
+      let title: String
+      switch result.status {
+      case .success: title = "成功"
+      case .skipped: title = "跳过"
+      case .failed: title = "失败"
+      }
+      return (result.name, title)
+    })
+    operationDetails = Dictionary(uniqueKeysWithValues: result.results.compactMap { result in
+      result.message.map { (result.name, $0) }
+    })
 
     for repo in result.results {
       switch repo.status {
@@ -376,6 +407,7 @@ public final class ReposSwitchViewModel {
     let skippedCount = result.results.filter { $0.status == .skipped }.count
     let failedCount = result.results.filter { $0.status == .failed }.count
     pullSummary = "最近拉取：成功 \(successCount)，跳过 \(skippedCount)，失败 \(failedCount)"
+    operationSummary = pullSummary
     LogManager.shared.info("========== \(pullSummary ?? "拉取完成") ==========")
   }
 
@@ -388,6 +420,9 @@ public final class ReposSwitchViewModel {
     repos = []
     rootPath = ""
     isConfirmEnabled = false
+    operationSummary = nil
+    operationResults = [:]
+    operationDetails = [:]
   }
 
   private func findWorkspace(in path: String) -> URL? {

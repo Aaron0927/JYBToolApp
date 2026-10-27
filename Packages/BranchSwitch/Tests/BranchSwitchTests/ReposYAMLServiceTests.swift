@@ -65,6 +65,33 @@ final class ReposYAMLServiceTests: XCTestCase {
     XCTAssertEqual(dependencyResult.message, "当前分支未配置 upstream")
   }
 
+  func testPullAllRepositoriesContinuesAfterAnotherRepositoryFails() throws {
+    let fixture = try makePullFixture()
+    try commitAndPushChange(in: fixture.workspaceUpdater, fileName: "workspace.txt", content: "workspace remote update")
+
+    try configureGitUser(at: fixture.project)
+    try "workspace local commit".write(
+      to: fixture.project.appending(path: "workspace.txt"),
+      atomically: true,
+      encoding: .utf8
+    )
+    try runGit("add workspace.txt", at: fixture.project)
+    try runGit("commit -m 'Divergent local change'", at: fixture.project)
+
+    try commitAndPushChange(in: fixture.dependencyUpdater, fileName: "dependency.txt", content: "dependency remote update")
+
+    let results = try ReposYAMLService().pullAllRepositories(atProjectPath: fixture.project.path) { _ in }
+    let workspaceResult = try XCTUnwrap(results.first { $0.name == fixture.project.lastPathComponent })
+    let dependencyResult = try XCTUnwrap(results.first { $0.name == "Dependency" })
+
+    XCTAssertEqual(workspaceResult.status, .failed)
+    XCTAssertEqual(dependencyResult.status, .success, dependencyResult.message ?? "未知错误")
+    XCTAssertEqual(
+      try String(contentsOf: fixture.dependency.appending(path: "dependency.txt"), encoding: .utf8),
+      "dependency remote update"
+    )
+  }
+
   func testParseReposConfig() throws {
     let service = ReposYAMLService()
     let content = """

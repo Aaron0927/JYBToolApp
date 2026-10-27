@@ -42,6 +42,8 @@ public struct Repo: Identifiable, Sendable {
     public var isAvailable: Bool = true
     public var submodules: [Submodule] = []
     public var hasStash: Bool = false
+    public var operationStatus: String?
+    public var operationDetail: String?
 
     public init(
         id: UUID = UUID(),
@@ -53,7 +55,9 @@ public struct Repo: Identifiable, Sendable {
         isMainRepo: Bool = false,
         isAvailable: Bool = true,
         submodules: [Submodule] = [],
-        hasStash: Bool = false
+        hasStash: Bool = false,
+        operationStatus: String? = nil,
+        operationDetail: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -65,5 +69,7 @@ public struct Repo: Identifiable, Sendable {
         self.isAvailable = isAvailable
         self.submodules = submodules
         self.hasStash = hasStash
+        self.operationStatus = operationStatus
+        self.operationDetail = operationDetail
     }
 }

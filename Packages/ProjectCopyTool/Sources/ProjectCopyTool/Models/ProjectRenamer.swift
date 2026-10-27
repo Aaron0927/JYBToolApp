@@ -1,7 +1,7 @@
 import Foundation
-import AppKit
 
-public final class ProjectRenamer {
+// 重命名器和文件处理器仅由单个串行后台任务使用。
+public final class ProjectRenamer: @unchecked Sendable {
     private let config: RenamerConfig
     private let fileProcessor: FileProcessor
     private var stepStatuses: [String: StepStatus] = [:]
@@ -26,7 +26,7 @@ public final class ProjectRenamer {
         self.fileProcessor = FileProcessor(config: config)
     }
 
-    public func execute(onStepChange: ((String, StepStatus) -> Void)? = nil) -> RenameResult {
+    public func execute(onStepChange: (@Sendable (String, StepStatus) -> Void)? = nil) -> RenameResult {
         let startTime = Date()
 
         do {
@@ -143,10 +143,6 @@ public final class ProjectRenamer {
             return .failure([error.localizedDescription])
         }
         
-        if config.autoOpenProject {
-            openProjects()
-        }
-        
         let duration = Date().timeIntervalSince(startTime)
         return RenameResult.success(
             filesReplaced: fileProcessor.filesReplaced,
@@ -160,14 +156,8 @@ public final class ProjectRenamer {
         return stepStatuses
     }
 
-    private func updateStatus(_ step: String, status: StepStatus, handler: ((String, StepStatus) -> Void)?) {
+    private func updateStatus(_ step: String, status: StepStatus, handler: (@Sendable (String, StepStatus) -> Void)?) {
         stepStatuses[step] = status
         handler?(step, status)
-    }
-    
-    private func openProjects() {
-        for projectURL in config.projectURLs {
-            NSWorkspace.shared.open(projectURL)
-        }
     }
 }

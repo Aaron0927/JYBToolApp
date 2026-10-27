@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ConfigFileModification: Identifiable, Codable {
+public struct ConfigFileModification: Identifiable, Codable, Sendable {
     public let id: UUID
     public let fileNamePattern: String
     public let keysToModify: [String]

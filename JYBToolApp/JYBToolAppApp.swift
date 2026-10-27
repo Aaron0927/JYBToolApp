@@ -10,7 +10,7 @@ import Sparkle
 
 @main
 struct JYBToolAppApp: App {
-    @StateObject private var updaterController = UpdaterController()
+    @State private var updaterController = UpdaterController()
 
     var body: some Scene {
         WindowGroup {
