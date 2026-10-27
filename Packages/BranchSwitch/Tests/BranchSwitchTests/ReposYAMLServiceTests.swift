@@ -320,6 +320,57 @@ final class ReposYAMLServiceTests: XCTestCase {
     XCTAssertTrue(try service.loadTags(at: repository.path).tags.isEmpty)
   }
 
+  func testCreateAndPushTagPublishesAnnotatedTag() throws {
+    let remote = temporaryDirectory.appending(path: "create-push-tag-remote.git", directoryHint: .isDirectory)
+    let repository = temporaryDirectory.appending(path: "create-push-tag-repository", directoryHint: .isDirectory)
+    try runGit("init --bare \(shellEscaped(remote.path))", at: temporaryDirectory)
+    try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+    try runGit("init", at: repository)
+    try configureGitUser(at: repository)
+    try "release content".write(to: repository.appending(path: "release.txt"), atomically: true, encoding: .utf8)
+    try runGit("add release.txt", at: repository)
+    try runGit("commit -m 'Release commit'", at: repository)
+    try runGit("remote add origin \(shellEscaped(remote.path))", at: repository)
+    try runGit("push -u origin HEAD", at: repository)
+
+    let service = ReposYAMLService()
+    try service.createAndPushTag("v1.0.0", message: "First release", at: repository.path)
+    let snapshot = try service.loadTags(at: repository.path)
+    let tag = try XCTUnwrap(snapshot.tags.first)
+
+    XCTAssertTrue(snapshot.hasOrigin)
+    XCTAssertEqual(tag.name, "v1.0.0")
+    XCTAssertNotNil(tag.localObjectID)
+    let localObjectID = try XCTUnwrap(tag.localObjectID)
+    let remoteObjectID = try XCTUnwrap(tag.remoteObjectID)
+    XCTAssertTrue(remoteObjectID.hasPrefix(localObjectID))
+  }
+
+  func testCreateAndPushTagLeavesLocalTagWhenOriginIsUnavailable() throws {
+    let repository = temporaryDirectory.appending(path: "tag-without-origin", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+    try runGit("init", at: repository)
+    try configureGitUser(at: repository)
+    try "release content".write(to: repository.appending(path: "release.txt"), atomically: true, encoding: .utf8)
+    try runGit("add release.txt", at: repository)
+    try runGit("commit -m 'Release commit'", at: repository)
+
+    XCTAssertThrowsError(
+      try ReposYAMLService().createAndPushTag("v1.0.0", message: "First release", at: repository.path)
+    ) { error in
+      guard case ReposYAMLServiceError.tagPushFailed(let name, _) = error else {
+        return XCTFail("期望得到本地创建成功、推送失败的错误，实际为：\(error)")
+      }
+      XCTAssertEqual(name, "v1.0.0")
+    }
+
+    let snapshot = try ReposYAMLService().loadTags(at: repository.path)
+    let tag = try XCTUnwrap(snapshot.tags.first)
+    XCTAssertEqual(tag.name, "v1.0.0")
+    XCTAssertNotNil(tag.localObjectID)
+    XCTAssertNil(tag.remoteObjectID)
+  }
+
   func testTagManagementRejectsInvalidTagName() throws {
     let repository = temporaryDirectory.appending(path: "invalid-tag-repository", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)

@@ -12,6 +12,7 @@ public enum ReposYAMLServiceError: Error, LocalizedError, Sendable {
   case emptyRepos
   case notGitRepository(String)
   case tagNotFound(repo: String, tag: String)
+  case tagPushFailed(name: String, reason: String)
 
   public var errorDescription: String? {
     switch self {
@@ -27,6 +28,8 @@ public enum ReposYAMLServiceError: Error, LocalizedError, Sendable {
       return "路径已存在但不是 Git 仓库: \(path)"
     case .tagNotFound(let repo, let tag):
       return "\(repo) 未找到 tag: \(tag)"
+    case .tagPushFailed(let name, let reason):
+      return "Tag \(name) 已在本地创建，但推送到 origin 失败：\(reason)"
     }
   }
 }
@@ -258,6 +261,18 @@ public final class ReposYAMLService: Sendable {
       "git tag -a \(shellEscaped(name)) -m \(shellEscaped(message))",
       at: path
     )
+  }
+
+  public func createAndPushTag(_ name: String, message: String, at path: String) throws {
+    try createTag(name, message: message, at: path)
+    do {
+      try pushTag(name, at: path)
+    } catch {
+      throw ReposYAMLServiceError.tagPushFailed(
+        name: name,
+        reason: error.localizedDescription
+      )
+    }
   }
 
   public func pushTag(_ name: String, at path: String) throws {

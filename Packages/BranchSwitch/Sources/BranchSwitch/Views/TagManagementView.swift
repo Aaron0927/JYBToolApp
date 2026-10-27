@@ -5,6 +5,7 @@ public struct TagManagementView: View {
   @Bindable private var viewModel: TagManagementViewModel
   @State private var pendingAction: PendingTagAction?
   @State private var isShowingConfirmation = false
+  @State private var isShowingTagForm = false
 
   public init(viewModel: TagManagementViewModel) {
     self.viewModel = viewModel
@@ -15,11 +16,11 @@ public struct TagManagementView: View {
       VStack(alignment: .leading, spacing: 16) {
         ToolPageHeader(
           title: "Tag 管理",
-          subtitle: "查看公版仓库的本地和远端 Tag，并切换到指定 Tag、创建、推送或删除 Tag。",
+          subtitle: "选择仓库后，在当前 HEAD 设置 annotated Tag 并推送到 origin。",
           systemImage: "tag"
         )
 
-        ToolPanel("公版主工程", systemImage: "folder") {
+        ToolPanel("设置并推送 Tag", systemImage: "tag") {
           HStack {
             TextField("选择包含 fastlane/repos.yml 的主工程目录", text: $viewModel.projectPath)
               .disabled(true)
@@ -31,12 +32,88 @@ public struct TagManagementView: View {
             .disabled(viewModel.isBusy)
 
             Button("读取仓库", systemImage: "doc.text.magnifyingglass") {
+              isShowingTagForm = false
               viewModel.loadRepositories()
             }
             .buttonStyle(.bordered)
             .disabled(viewModel.projectPath.isEmpty || viewModel.isBusy)
           }
 
+          if let repository = viewModel.selectedRepository {
+            Divider()
+            ToolValueRow("当前仓库", value: repository.name)
+            ToolValueRow("当前分支", value: repository.currentBranch.isEmpty ? "未检测到分支" : repository.currentBranch)
+            ToolValueRow("仓库路径", value: repository.absolutePath)
+
+            HStack {
+              if repository.isCloned {
+                Text("Tag 将基于当前 HEAD 创建")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              } else {
+                Label("该仓库尚未克隆，无法设置或推送 Tag。", systemImage: "exclamationmark.triangle")
+                  .font(.caption)
+                  .foregroundStyle(.orange)
+              }
+              Spacer()
+              Button(isShowingTagForm ? "收起设置" : "设置并推送 Tag", systemImage: isShowingTagForm ? "chevron.up" : "tag") {
+                isShowingTagForm.toggle()
+              }
+              .buttonStyle(.borderedProminent)
+              .disabled(viewModel.isBusy || !repository.isCloned)
+            }
+
+            if isShowingTagForm {
+              VStack(alignment: .leading, spacing: 12) {
+                TextField("Tag 名称，例如 v8.4.21", text: $viewModel.tagName)
+                  .font(.system(.body, design: .monospaced))
+                  .accessibilityLabel("Tag 名称")
+                  .disabled(viewModel.isBusy)
+                TextField("附注说明", text: $viewModel.tagMessage, axis: .vertical)
+                  .lineLimit(2...4)
+                  .accessibilityLabel("Tag 附注说明")
+                  .disabled(viewModel.isBusy)
+                HStack {
+                  Text("确认后会在当前 HEAD 创建 Tag，并推送到 origin。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                  Spacer()
+                  Button("设置并推送", systemImage: "arrow.up") {
+                    pendingAction = .createAndPush(
+                      viewModel.tagName.trimmingCharacters(in: .whitespacesAndNewlines),
+                      viewModel.tagMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                    isShowingConfirmation = true
+                  }
+                  .buttonStyle(.borderedProminent)
+                  .disabled(
+                    viewModel.isBusy ||
+                      viewModel.tagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                      viewModel.tagMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                  )
+                  .keyboardShortcut(.defaultAction)
+                }
+              }
+              .padding(12)
+              .background(.quaternary, in: .rect(cornerRadius: 10))
+            }
+          } else if viewModel.repositories.isEmpty, !viewModel.isLoading {
+            ContentUnavailableView(
+              "尚未载入仓库",
+              systemImage: "shippingbox",
+              description: Text("选择主工程目录并读取仓库后，可从下方列表选择目标仓库。")
+            )
+            .frame(maxWidth: .infinity, minHeight: 110)
+          }
+
+          if viewModel.isLoading {
+            ProgressView("正在读取仓库列表…")
+              .controlSize(.small)
+          }
+          if viewModel.isWorking {
+            ProgressView("正在设置并推送 Tag…")
+              .controlSize(.small)
+          }
           if let error = viewModel.errorMessage {
             Label(error, systemImage: "exclamationmark.triangle.fill")
               .foregroundStyle(.red)
@@ -46,116 +123,29 @@ public struct TagManagementView: View {
               .foregroundStyle(.secondary)
           }
 
-          if viewModel.isLoading {
-            ProgressView("正在读取仓库或 Tag…")
-              .controlSize(.small)
+          if viewModel.canRetryPendingPush, let tagName = viewModel.pendingPushTagName {
+            Label("Tag「\(tagName)」已在本地创建，但尚未推送。", systemImage: "exclamationmark.arrow.circlepath")
+              .foregroundStyle(.orange)
+            HStack {
+              Spacer()
+              Button("重试推送到 origin", systemImage: "arrow.up") {
+                pendingAction = .retryPush(tagName)
+                isShowingConfirmation = true
+              }
+              .disabled(viewModel.isBusy)
+            }
           }
         }
 
-        if !viewModel.repositories.isEmpty {
-          ToolPanel("选择仓库", systemImage: "shippingbox") {
-            Picker(
-              "公版仓库",
-              selection: Binding(
-                get: { viewModel.selectedRepositoryID },
-                set: { viewModel.selectRepository($0) }
-              )
-            ) {
-              ForEach(viewModel.repositories) { repository in
-                Text(repository.name + (repository.isCloned ? "" : "（未克隆）"))
-                  .tag(repository.id)
-              }
-            }
-            .disabled(viewModel.isBusy)
-
-            if let repository = viewModel.selectedRepository {
-              ToolValueRow("当前分支", value: repository.currentBranch)
-              ToolValueRow("仓库路径", value: repository.absolutePath)
-            }
-
-            HStack {
-              if viewModel.hasOrigin {
-                ToolStatusBadge("origin 已配置", kind: .success)
-              } else {
-                ToolStatusBadge("未配置 origin", kind: .warning)
-              }
-              Spacer()
-              Button("刷新 Tag", systemImage: "arrow.clockwise") {
-                viewModel.loadTags()
-              }
-              .disabled(viewModel.isBusy || viewModel.selectedRepository?.isCloned != true)
-            }
-          }
-
-          ToolPanel("创建 Tag", systemImage: "tag") {
-            TextField("Tag 名称，例如 v8.4.21", text: $viewModel.tagName)
-              .accessibilityLabel("新 Tag 名称")
-              .disabled(viewModel.isBusy || viewModel.selectedRepository?.isCloned != true)
-            TextField("Tag 说明", text: $viewModel.tagMessage, axis: .vertical)
-              .lineLimit(2...4)
-              .accessibilityLabel("新 Tag 说明")
-              .disabled(viewModel.isBusy || viewModel.selectedRepository?.isCloned != true)
-            HStack {
-              Text("将在所选仓库当前 HEAD 创建附注 Tag。创建后可单独推送到 origin。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              Spacer()
-              Button("创建 Tag", systemImage: "plus") {
-                pendingAction = .create(
-                  viewModel.tagName.trimmingCharacters(in: .whitespacesAndNewlines),
-                  viewModel.tagMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
-                isShowingConfirmation = true
-              }
-              .buttonStyle(.borderedProminent)
-              .disabled(
-                viewModel.isBusy ||
-                  viewModel.selectedRepository?.isCloned != true ||
-                  viewModel.tagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                  viewModel.tagMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-              )
-              .keyboardShortcut(.defaultAction)
-            }
-          }
-
-          ToolPanel("现有 Tag", systemImage: "list.bullet") {
-            if viewModel.isLoading {
-              ProgressView("正在读取本地与远端 Tag…")
-                .frame(maxWidth: .infinity, minHeight: 90)
-            } else if viewModel.tags.isEmpty {
-              ContentUnavailableView(
-                "没有找到 Tag",
-                systemImage: "tag",
-                description: Text("可以在上方为当前仓库 HEAD 创建一个新 Tag。")
-              )
-              .frame(maxWidth: .infinity, minHeight: 110)
-            } else {
-              VStack(alignment: .leading, spacing: 8) {
-                ForEach(viewModel.tags) { tag in
-                  TagManagementRow(
-                    tag: tag,
-                    hasOrigin: viewModel.hasOrigin,
-                    isDisabled: viewModel.isBusy,
-                    push: {
-                      pendingAction = .push(tag.name)
-                      isShowingConfirmation = true
-                    },
-                    deleteLocal: {
-                      pendingAction = .deleteLocal(tag.name)
-                      isShowingConfirmation = true
-                    },
-                    deleteRemote: {
-                      pendingAction = .deleteRemote(tag.name)
-                      isShowingConfirmation = true
-                    },
-                    checkout: {
-                      pendingAction = .checkout(tag.name)
-                      isShowingConfirmation = true
-                    }
-                  )
-                }
-              }
-            }
+        ToolPanel("仓库列表", systemImage: "shippingbox") {
+          if viewModel.repositories.isEmpty {
+            Text("读取主工程配置后，这里会列出主仓库和全部依赖仓库。")
+              .foregroundStyle(.secondary)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .padding(.vertical, 8)
+          } else {
+            repositorySection("主仓库", scope: .workspace)
+            repositorySection("依赖仓库", scope: .dependency)
           }
         }
       }
@@ -169,21 +159,17 @@ public struct TagManagementView: View {
       titleVisibility: .visible
     ) {
       if let pendingAction {
-        Button(pendingAction.confirmationTitle, role: pendingAction.isDestructive ? .destructive : nil) {
+        Button(pendingAction.confirmationTitle) {
           switch pendingAction {
-          case .create(let name, let message):
-            viewModel.createTag(name: name, message: message)
-          case .push(let name):
-            viewModel.pushTag(name)
-          case .deleteLocal(let name):
-            viewModel.deleteLocalTag(name)
-          case .deleteRemote(let name):
-            viewModel.deleteRemoteTag(name)
-          case .checkout(let name):
-            viewModel.checkoutTag(name)
+          case .createAndPush(let name, let message):
+            viewModel.createAndPushTag(name: name, message: message)
+            isShowingTagForm = false
+          case .retryPush:
+            viewModel.retryPendingTagPush()
           }
           self.pendingAction = nil
         }
+        .keyboardShortcut(.defaultAction)
       }
       Button("取消", role: .cancel) {
         pendingAction = nil
@@ -192,118 +178,54 @@ public struct TagManagementView: View {
       Text(pendingAction?.message ?? "")
     }
   }
-}
 
-private struct TagManagementRow: View {
-  let tag: GitTagInfo
-  let hasOrigin: Bool
-  let isDisabled: Bool
-  let push: () -> Void
-  let deleteLocal: () -> Void
-  let deleteRemote: () -> Void
-  let checkout: () -> Void
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        Text(tag.name)
-          .font(.system(.body, design: .monospaced))
-          .textSelection(.enabled)
-        Spacer()
-        if tag.localObjectID != nil {
-          ToolStatusBadge("本地", kind: .success)
-        }
-        if tag.remoteObjectID != nil {
-          ToolStatusBadge("origin", kind: .neutral)
+  @ViewBuilder
+  private func repositorySection(_ title: String, scope: RepoSwitchScope) -> some View {
+    let repositories = viewModel.repositories.filter { $0.scope == scope }
+    if !repositories.isEmpty {
+      VStack(alignment: .leading, spacing: 8) {
+        Text(title)
+          .font(.headline)
+        ForEach(repositories) { repository in
+          TagRepositoryRow(
+            repository: repository,
+            isSelected: repository.id == viewModel.selectedRepositoryID,
+            isDisabled: viewModel.isBusy,
+            onSelect: {
+              isShowingTagForm = false
+              viewModel.selectRepository(repository.id)
+            }
+          )
         }
       }
-
-      HStack {
-        Text("本地对象：\(tag.localObjectID ?? "—")")
-        Text("远端对象：\(tag.remoteObjectID ?? "—")")
-      }
-      .font(.system(.caption, design: .monospaced))
-      .foregroundStyle(.secondary)
-      .textSelection(.enabled)
-
-      HStack {
-        Spacer()
-        Button("切换到此 Tag", systemImage: "arrow.uturn.down") {
-          checkout()
-        }
-        .disabled(isDisabled)
-        if tag.localObjectID != nil, hasOrigin, tag.localObjectID != tag.remoteObjectID {
-          Button("推送", systemImage: "arrow.up") {
-            push()
-          }
-          .disabled(isDisabled)
-        }
-        if tag.localObjectID != nil {
-          Button("删除本地", systemImage: "trash", role: .destructive) {
-            deleteLocal()
-          }
-          .disabled(isDisabled)
-        }
-        if tag.remoteObjectID != nil {
-          Button("删除远端", systemImage: "trash", role: .destructive) {
-            deleteRemote()
-          }
-          .disabled(isDisabled || !hasOrigin)
-        }
-      }
-      .buttonStyle(.borderless)
     }
-    .padding(10)
-    .background(.quaternary, in: .rect(cornerRadius: 8))
   }
 }
 
 private enum PendingTagAction {
-  case create(String, String)
-  case push(String)
-  case deleteLocal(String)
-  case deleteRemote(String)
-  case checkout(String)
+  case createAndPush(String, String)
+  case retryPush(String)
 
   var title: String {
     switch self {
-    case .create: "确认创建 Tag？"
-    case .push: "确认推送 Tag？"
-    case .deleteLocal: "确认删除本地 Tag？"
-    case .deleteRemote: "确认删除远端 Tag？"
-    case .checkout: "确认切换到 Tag？"
+    case .createAndPush: "确认设置并推送 Tag？"
+    case .retryPush: "确认重试推送 Tag？"
     }
   }
 
   var confirmationTitle: String {
     switch self {
-    case .create: "创建 Tag"
-    case .push: "推送到 origin"
-    case .deleteLocal: "删除本地 Tag"
-    case .deleteRemote: "删除远端 Tag"
-    case .checkout: "切换到此 Tag"
+    case .createAndPush: "设置并推送"
+    case .retryPush: "推送到 origin"
     }
   }
 
   var message: String {
     switch self {
-    case .create(let name, let message):
-      "将在当前仓库 HEAD 创建附注 Tag“\(name)”（\(message)）。"
-    case .push(let name):
-      "将把本地 Tag“\(name)”推送到 origin。"
-    case .deleteLocal(let name):
-      "只删除本机上的 Tag“\(name)”，远端副本不受影响。"
-    case .deleteRemote(let name):
-      "将从 origin 删除 Tag“\(name)”。其他协作者将无法再从 origin 获取该 Tag。"
-    case .checkout(let name):
-      "将在所选仓库 fetch Tag“\(name)”并切换到该提交的 detached HEAD。"
-    }
-  }
-
-  var isDestructive: Bool {
-    switch self {
-    case .deleteLocal, .deleteRemote: true
-    case .create, .push, .checkout: false
+    case .createAndPush(let name, let message):
+      "将在所选仓库当前 HEAD 创建 annotated Tag「\(name)」，附注为「\(message)」，并推送到 origin。"
+    case .retryPush(let name):
+      "将把本地 Tag「\(name)」推送到 origin。"
     }
   }
 }
