@@ -17,6 +17,7 @@ final class ContentViewModel {
         .reposBranchTool,
         .reposPullTool,
         .reposTagTool,
+        .branchSyncTool,
         .branchTool,
         .switchTool,
         .copyTool,

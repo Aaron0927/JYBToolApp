@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var reposSwitchViewModel = BranchSwitch.ReposSwitchViewModel()
     @State private var pullLatestViewModel = BranchSwitch.ReposSwitchViewModel()
     @State private var tagManagementViewModel = BranchSwitch.TagManagementViewModel()
+    @State private var branchSyncViewModel = BranchSwitch.BranchSyncViewModel()
 
     var body: some View {
     VStack(spacing: 0) {
@@ -63,6 +64,8 @@ struct ContentView: View {
               PullLatestView(viewModel: pullLatestViewModel)
             case Tool.reposTagTool.id:
               TagManagementView(viewModel: tagManagementViewModel)
+            case Tool.branchSyncTool.id:
+              BranchSyncView(viewModel: branchSyncViewModel)
             default:
               ContentUnavailableView("找不到工具", systemImage: "questionmark.folder")
             }
