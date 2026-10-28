@@ -16,6 +16,6 @@
 
 ## 发布
 
-- 版本号由 `scripts/release.sh` 管理；Tag 触发 GitHub Actions 构建 DMG、更新 Appcast 并部署到 GitHub Pages。
+- 版本号由 `scripts/release.sh` 管理；build 号优先使用日期，并在同日重复发布时递增，保持更新版本单调增长。Tag 触发 GitHub Actions 构建 DMG、更新 Appcast 并部署到 GitHub Pages。
 - 发布验收检查构建成功、DMG 产物、Appcast 版本和下载链接，以及 Sparkle 更新通道。
 - Appcast 与签名私钥仍由现有 CI 流程维护，私钥不落入仓库。

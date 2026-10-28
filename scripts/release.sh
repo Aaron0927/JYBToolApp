@@ -52,6 +52,10 @@ fi
 
 TAG="v$VERSION"
 BUILD=$(date +%Y%m%d)
+CURRENT_BUILD=$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\);.*/\1/p' "$PROJECT" | head -1)
+if [[ "$CURRENT_BUILD" =~ ^[0-9]+$ ]] && [ "$BUILD" -le "$CURRENT_BUILD" ]; then
+    BUILD=$((CURRENT_BUILD + 1))
+fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " 版本: $VERSION"
