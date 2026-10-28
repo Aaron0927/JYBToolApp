@@ -80,6 +80,53 @@ final class BranchSyncServiceTests: XCTestCase {
     )
   }
 
+  func testSyncPreservesTargetReposConfigAndMergesOtherProjectChanges() throws {
+    let fixture = try makeFixture()
+
+    let service = BranchSyncService()
+    let context = try service.loadProjectContext(atProjectPath: fixture.project.path)
+    let preview = try service.loadPreview(for: context, targetProjectBranch: "master")
+    let workspace = try XCTUnwrap(preview.repositories.first { $0.isWorkspace })
+
+    let result = service.sync(workspace)
+
+    XCTAssertEqual(result.status, .success, result.message)
+    XCTAssertEqual(try runGit("branch --show-current", at: fixture.project), "develop")
+    XCTAssertTrue(
+      try runGit("show origin/master:fastlane/repos.yml", at: fixture.project).contains("branch: main")
+    )
+    XCTAssertEqual(
+      try runGit("rev-list --parents -n 1 origin/master", at: fixture.project).split(whereSeparator: \.isWhitespace).count,
+      3,
+      "同步应创建包含来源和目标两个父提交的合并提交"
+    )
+    XCTAssertEqual(
+      try runGit("show origin/master:development.txt", at: fixture.project),
+      "development project change"
+    )
+  }
+
+  func testSyncResolvesReposConfigConflictByKeepingTargetVersion() throws {
+    let fixture = try makeFixture()
+    try customizeMasterReposConfig(in: fixture.project)
+
+    let service = BranchSyncService()
+    let context = try service.loadProjectContext(atProjectPath: fixture.project.path)
+    let preview = try service.loadPreview(for: context, targetProjectBranch: "master")
+    let workspace = try XCTUnwrap(preview.repositories.first { $0.isWorkspace })
+
+    let result = service.sync(workspace)
+
+    XCTAssertEqual(result.status, .success, result.message)
+    XCTAssertTrue(
+      try runGit("show origin/master:fastlane/repos.yml", at: fixture.project).contains("branch: stable-target")
+    )
+    XCTAssertEqual(
+      try runGit("show origin/master:development.txt", at: fixture.project),
+      "development project change"
+    )
+  }
+
   func testSyncSkipsDirtyRepository() throws {
     let fixture = try makeFixture()
     let service = BranchSyncService()
@@ -143,7 +190,13 @@ final class BranchSyncServiceTests: XCTestCase {
 
     try runGit("checkout -b develop \(projectStableBranch)", at: project)
     try writeProjectConfig(in: project, dependencyBranch: "develop", dependencyRemote: dependencyRemote)
+    try "development project change".write(
+      to: project.appending(path: "development.txt"),
+      atomically: true,
+      encoding: .utf8
+    )
     try runGit("add fastlane/repos.yml", at: project)
+    try runGit("add development.txt", at: project)
     try runGit("commit -m 'Development project config'", at: project)
 
     try FileManager.default.createDirectory(at: dependency, withIntermediateDirectories: true)
@@ -196,6 +249,20 @@ final class BranchSyncServiceTests: XCTestCase {
   private func configureGitUser(at path: URL) throws {
     try runGit("config user.email branch-sync-tests@example.com", at: path)
     try runGit("config user.name BranchSyncTests", at: path)
+  }
+
+  private func customizeMasterReposConfig(in project: URL) throws {
+    let dependencyRemote = temporaryDirectory.appending(path: "dependency.git")
+    try runGit("checkout master", at: project)
+    try writeProjectConfig(
+      in: project,
+      dependencyBranch: "stable-target",
+      dependencyRemote: dependencyRemote
+    )
+    try runGit("add fastlane/repos.yml", at: project)
+    try runGit("commit -m 'Customize target repos config'", at: project)
+    try runGit("push origin master", at: project)
+    try runGit("checkout develop", at: project)
   }
 
   @discardableResult

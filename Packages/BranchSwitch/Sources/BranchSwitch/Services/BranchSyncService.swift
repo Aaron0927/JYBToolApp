@@ -7,6 +7,7 @@ public enum BranchSyncServiceError: Error, LocalizedError, Sendable {
   case missingTargetBranches(String)
   case invalidTargetBranch(String)
   case missingRemoteConfig(String)
+  case mergeConflict(String)
 
   public var errorDescription: String? {
     switch self {
@@ -16,6 +17,7 @@ public enum BranchSyncServiceError: Error, LocalizedError, Sendable {
     case .missingTargetBranches(let path): "主工程 origin 上没有可用分支：\(path)"
     case .invalidTargetBranch(let branch): "目标分支不在主工程 origin 分支列表中：\(branch)"
     case .missingRemoteConfig(let path): "目标分支中未找到 fastlane/repos.yml：\(path)"
+    case .mergeConflict(let paths): "合并存在未解决冲突：\(paths)"
     }
   }
 }
@@ -191,7 +193,7 @@ public final class BranchSyncService: Sendable {
       }
 
       var operationStatus: BranchSyncStatus = .success
-      var operationMessage = "合并成功并已推送到 origin/\(targetBranch)。"
+      var operationMessage = "合并成功，已保留目标分支的 fastlane/repos.yml，并推送到 origin/\(targetBranch)。"
 
       do {
         if hasLocalTarget {
@@ -205,19 +207,50 @@ public final class BranchSyncService: Sendable {
         }
 
         do {
-          _ = try runChecked("git merge --no-edit \(shellEscaped(sourceRef))", at: path, timeout: 180)
+          do {
+            _ = try runChecked(
+              "git merge --no-ff --no-commit \(shellEscaped(sourceRef))",
+              at: path,
+              timeout: 180
+            )
+          } catch {
+            guard referenceExists("MERGE_HEAD", at: path, isGitPath: true) else {
+              throw error
+            }
+          }
+
+          if referenceExists("MERGE_HEAD", at: path, isGitPath: true) {
+            do {
+              try restoreTargetReposConfig(at: path)
+              let unresolvedPaths = try processRunner.run(
+                "git diff --name-only --diff-filter=U",
+                at: path
+              ).trimmingCharacters(in: .whitespacesAndNewlines)
+              guard unresolvedPaths.isEmpty else {
+                throw BranchSyncServiceError.mergeConflict(unresolvedPaths)
+              }
+              _ = try runChecked("git commit --no-edit", at: path, timeout: 180)
+            } catch {
+              if referenceExists("MERGE_HEAD", at: path, isGitPath: true) {
+                _ = try? processRunner.run("git merge --abort", at: path)
+              }
+              throw error
+            }
+
+            do {
+              _ = try runChecked("git push origin \(shellEscaped(targetBranch))", at: path, timeout: 180)
+            } catch {
+              operationStatus = .pushFailed
+              operationMessage = "本地已完成合并，但推送失败；本地 \(targetBranch) 分支保留合并结果：\(error.localizedDescription)"
+            }
+          } else {
+            operationMessage = "目标分支已包含来源分支，无需合并。"
+          }
         } catch {
           if referenceExists("MERGE_HEAD", at: path, isGitPath: true) {
             _ = try? processRunner.run("git merge --abort", at: path)
           }
           throw error
-        }
-
-        do {
-          _ = try runChecked("git push origin \(shellEscaped(targetBranch))", at: path, timeout: 180)
-        } catch {
-          operationStatus = .pushFailed
-          operationMessage = "本地已完成合并，但推送失败；本地 \(targetBranch) 分支保留合并结果：\(error.localizedDescription)"
         }
       } catch {
         operationStatus = .failed
@@ -308,6 +341,20 @@ public final class BranchSyncService: Sendable {
 
   private func isAncestor(_ first: String, of second: String, at path: String) -> Bool {
     commandSucceeded("git merge-base --is-ancestor \(shellEscaped(first)) \(shellEscaped(second))", at: path)
+  }
+
+  private func restoreTargetReposConfig(at path: String) throws {
+    if commandSucceeded("git cat-file -e HEAD:fastlane/repos.yml", at: path) {
+      _ = try runChecked(
+        "git restore --source=HEAD --staged --worktree -- fastlane/repos.yml",
+        at: path
+      )
+    } else {
+      _ = try runChecked(
+        "git rm --force --ignore-unmatch -- fastlane/repos.yml",
+        at: path
+      )
+    }
   }
 
   private func commandSucceeded(_ command: String, at path: String) -> Bool {
