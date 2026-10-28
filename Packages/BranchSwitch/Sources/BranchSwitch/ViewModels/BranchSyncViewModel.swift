@@ -8,9 +8,12 @@ public final class BranchSyncViewModel {
   private static let lastProjectPathKey = "BranchSync.lastProjectPath"
 
   public var projectPath = ""
+  public private(set) var projectContext: BranchSyncProjectContext?
   public private(set) var preview: BranchSyncPreview?
+  public private(set) var selectedTargetBranch = ""
   public var selectedRepositoryIDs: Set<String> = []
   public private(set) var isLoading = false
+  public private(set) var loadingMessage: String?
   public private(set) var isWorking = false
   public private(set) var errorMessage: String?
   public private(set) var operationProgress: String?
@@ -25,14 +28,20 @@ public final class BranchSyncViewModel {
 
   public var isBusy: Bool { isLoading || isWorking }
 
+  public var targetBranches: [String] { projectContext?.targetBranches ?? [] }
+
+  public var canLoadTargetConfig: Bool {
+    !isBusy && projectContext?.targetBranches.contains(selectedTargetBranch) == true
+  }
+
   public var repositories: [BranchSyncRepository] { preview?.repositories ?? [] }
 
   public var selectableRepositories: [BranchSyncRepository] {
-    repositories.filter(\.isSelectable)
+    repositories.filter(\.canSync)
   }
 
   public var selectedRepositories: [BranchSyncRepository] {
-    repositories.filter { selectedRepositoryIDs.contains($0.id) && $0.isSelectable }
+    repositories.filter { selectedRepositoryIDs.contains($0.id) && $0.canSync }
   }
 
   public var areAllRepositoriesSelected: Bool {
@@ -47,11 +56,11 @@ public final class BranchSyncViewModel {
 
     if panel.runModal() == .OK, let url = panel.url {
       projectPath = url.path
-      loadPreview()
+      loadProjectBranches()
     }
   }
 
-  public func loadPreview() {
+  public func loadProjectBranches() {
     guard !projectPath.isEmpty else {
       errorMessage = "请选择包含 fastlane/repos.yml 的主工程目录。"
       return
@@ -59,38 +68,98 @@ public final class BranchSyncViewModel {
 
     currentTask?.cancel()
     isLoading = true
+    loadingMessage = "正在读取主工程配置和 origin 分支…"
     errorMessage = nil
+    projectContext = nil
+    preview = nil
+    selectedTargetBranch = ""
+    selectedRepositoryIDs = []
+    operationResults = []
     summary = nil
     operationProgress = nil
-    operationResults = []
-    preview = nil
-    selectedRepositoryIDs = []
     UserDefaults.standard.set(projectPath, forKey: Self.lastProjectPathKey)
-    LogManager.shared.info("读取当前分支和 origin/master 或 origin/main 的 repos.yml…")
+    LogManager.shared.info("读取主工程当前分支、repos.yml 和 origin 分支列表…")
 
     let path = projectPath
     currentTask = Task { @MainActor [weak self] in
-      let result = await Task.detached(priority: .userInitiated) { () -> Result<BranchSyncPreview, BranchSyncPreviewLoadError> in
+      let result = await Task.detached(priority: .userInitiated) { () -> Result<BranchSyncProjectContext, BranchSyncLoadError> in
         do {
-          return .success(try BranchSyncService().loadPreview(atProjectPath: path))
+          return .success(try BranchSyncService().loadProjectContext(atProjectPath: path))
         } catch {
-          return .failure(BranchSyncPreviewLoadError(message: error.localizedDescription))
+          return .failure(BranchSyncLoadError(message: error.localizedDescription))
         }
       }.value
 
       guard let self else { return }
       self.isLoading = false
+      self.loadingMessage = nil
+      self.currentTask = nil
+      switch result {
+      case .success(let context):
+        self.projectContext = context
+        self.selectedTargetBranch = context.defaultTargetBranch ?? ""
+        LogManager.shared.success(
+          "主工程当前分支：\(context.sourceProjectBranch)；读取到 origin 上 \(context.targetBranches.count) 个分支"
+        )
+      case .failure(let error):
+        self.errorMessage = error.message
+        LogManager.shared.error("读取主工程分支失败：\(error.message)")
+      }
+    }
+  }
+
+  public func selectTargetBranch(_ branch: String) {
+    guard !isBusy, targetBranches.contains(branch) else { return }
+    selectedTargetBranch = branch
+    preview = nil
+    selectedRepositoryIDs = []
+    operationResults = []
+    summary = nil
+    errorMessage = nil
+  }
+
+  public func loadTargetConfig() {
+    guard canLoadTargetConfig, let projectContext else {
+      errorMessage = "请先读取主工程分支，并选择有效的目标分支。"
+      return
+    }
+
+    currentTask?.cancel()
+    isLoading = true
+    loadingMessage = "正在读取 origin/\(selectedTargetBranch) 的 repos.yml…"
+    errorMessage = nil
+    preview = nil
+    selectedRepositoryIDs = []
+    operationResults = []
+    summary = nil
+
+    let branch = selectedTargetBranch
+    currentTask = Task { @MainActor [weak self] in
+      let result = await Task.detached(priority: .userInitiated) { () -> Result<BranchSyncPreview, BranchSyncLoadError> in
+        do {
+          return .success(try BranchSyncService().loadPreview(
+            for: projectContext,
+            targetProjectBranch: branch
+          ))
+        } catch {
+          return .failure(BranchSyncLoadError(message: error.localizedDescription))
+        }
+      }.value
+
+      guard let self else { return }
+      self.isLoading = false
+      self.loadingMessage = nil
       self.currentTask = nil
       switch result {
       case .success(let preview):
         self.preview = preview
-        self.selectedRepositoryIDs = Set(preview.repositories.filter(\.isSelectable).map(\.id))
+        self.selectedRepositoryIDs = Set(preview.repositories.filter(\.canSync).map(\.id))
         LogManager.shared.success(
-          "已读取 \(preview.repositories.count) 个仓库；来源配置 \(preview.sourceProjectBranch)，目标配置 origin/\(preview.targetConfigBranch)"
+          "已读取 origin/\(branch) 的 repos.yml，加载 \(preview.repositories.count) 个仓库目标"
         )
       case .failure(let error):
         self.errorMessage = error.message
-        LogManager.shared.error("读取分支同步配置失败：\(error.message)")
+        LogManager.shared.error("读取 origin/\(branch) 的 repos.yml 失败：\(error.message)")
       }
     }
   }
@@ -152,6 +221,6 @@ public final class BranchSyncViewModel {
   }
 }
 
-private struct BranchSyncPreviewLoadError: Error, Sendable {
+private struct BranchSyncLoadError: Error, Sendable {
   let message: String
 }

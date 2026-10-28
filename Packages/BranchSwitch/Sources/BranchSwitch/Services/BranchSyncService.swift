@@ -4,7 +4,8 @@ public enum BranchSyncServiceError: Error, LocalizedError, Sendable {
   case notGitRepository(String)
   case missingCurrentBranch
   case missingOrigin(String)
-  case missingStableBranch
+  case missingTargetBranches(String)
+  case invalidTargetBranch(String)
   case missingRemoteConfig(String)
 
   public var errorDescription: String? {
@@ -12,7 +13,8 @@ public enum BranchSyncServiceError: Error, LocalizedError, Sendable {
     case .notGitRepository(let path): "不是 Git 仓库：\(path)"
     case .missingCurrentBranch: "无法确定主工程当前分支。"
     case .missingOrigin(let path): "仓库没有配置 origin：\(path)"
-    case .missingStableBranch: "origin 上没有 master 或 main 分支。"
+    case .missingTargetBranches(let path): "主工程 origin 上没有可用分支：\(path)"
+    case .invalidTargetBranch(let branch): "目标分支不在主工程 origin 分支列表中：\(branch)"
     case .missingRemoteConfig(let path): "目标分支中未找到 fastlane/repos.yml：\(path)"
     }
   }
@@ -27,7 +29,7 @@ public final class BranchSyncService: Sendable {
     reposService = ReposYAMLService(processRunner: processRunner)
   }
 
-  public func loadPreview(atProjectPath projectPath: String) throws -> BranchSyncPreview {
+  public func loadProjectContext(atProjectPath projectPath: String) throws -> BranchSyncProjectContext {
     guard reposService.isGitRepository(at: projectPath) else {
       throw BranchSyncServiceError.notGitRepository(projectPath)
     }
@@ -40,16 +42,52 @@ public final class BranchSyncService: Sendable {
     let sourceConfig = try reposService.loadConfig(atProjectPath: projectPath)
     let configURL = reposService.configURL(forProjectPath: projectPath)
     let sourceRootURL = reposService.rootURL(for: sourceConfig, configURL: configURL)
-    let target = try fetchStableConfig(at: projectPath)
+    let targetBranches = try getRemoteBranches(at: projectPath)
+    guard !targetBranches.isEmpty else {
+      throw BranchSyncServiceError.missingTargetBranches(projectPath)
+    }
+    let defaultTargetBranch = ["master", "main"].first(where: targetBranches.contains)
 
-    let sourceByPath = Dictionary(sourceConfig.repos.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
-    let targetByPath = Dictionary(target.config.repos.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+    return BranchSyncProjectContext(
+      projectPath: URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL.path,
+      sourceProjectBranch: sourceProjectBranch,
+      sourceConfig: sourceConfig,
+      sourceRootPath: sourceRootURL.path,
+      targetBranches: targetBranches,
+      defaultTargetBranch: defaultTargetBranch
+    )
+  }
+
+  public func loadPreview(
+    for context: BranchSyncProjectContext,
+    targetProjectBranch: String
+  ) throws -> BranchSyncPreview {
+    guard context.targetBranches.contains(targetProjectBranch) else {
+      throw BranchSyncServiceError.invalidTargetBranch(targetProjectBranch)
+    }
+
+    let targetConfig = try loadRemoteConfig(
+      branch: targetProjectBranch,
+      atProjectPath: context.projectPath
+    )
+
+    let sourceByPath = Dictionary(context.sourceConfig.repos.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+    let targetByPath = Dictionary(targetConfig.repos.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
     let allPaths = Set(sourceByPath.keys).union(targetByPath.keys).sorted()
+    let sourceRootURL = URL(fileURLWithPath: context.sourceRootPath, isDirectory: true)
 
-    var repositories = [workspaceRepository(
-      projectPath: projectPath,
-      sourceBranch: sourceProjectBranch,
-      targetBranch: target.branch
+    let workspaceReason = context.sourceProjectBranch == targetProjectBranch
+      ? "主工程来源分支与目标分支相同"
+      : nil
+    var repositories = [BranchSyncRepository(
+      name: URL(fileURLWithPath: context.projectPath, isDirectory: true).lastPathComponent,
+      path: ".",
+      absolutePath: context.projectPath,
+      sourceBranch: context.sourceProjectBranch,
+      targetBranch: targetProjectBranch,
+      isWorkspace: true,
+      isSelectable: workspaceReason == nil,
+      unavailableReason: workspaceReason
     )]
 
     for path in allPaths {
@@ -58,23 +96,19 @@ public final class BranchSyncService: Sendable {
       let name = source?.name ?? destination?.name ?? path
       let repositoryURL = source.map { reposService.repoURL(for: $0, rootURL: sourceRootURL) }
         ?? sourceRootURL.appending(path: path).standardizedFileURL
-      let sourceBranch = source?.branch
-      let targetBranch = destination?.branch
+      let configuredSourceBranch = source?.branch
+      let configuredTargetBranch = destination?.branch
       let isCloned = reposService.isGitRepository(at: repositoryURL.path)
       let reason: String?
 
       if source == nil {
         reason = "当前分支的 repos.yml 未声明此仓库"
       } else if destination == nil {
-        reason = "\(target.branch) 分支的 repos.yml 未声明此仓库"
+        reason = "\(targetProjectBranch) 分支的 repos.yml 未声明此仓库"
       } else if !isCloned {
         reason = "仓库尚未克隆"
-      } else if let sourceBranch, !isValidBranch(sourceBranch, at: repositoryURL.path) {
-        reason = "来源分支名无效：\(sourceBranch)"
-      } else if let sourceBranch, !localBranchExists(sourceBranch, at: repositoryURL.path) {
-        reason = "本地不存在来源分支：\(sourceBranch)"
-      } else if let targetBranch, !isValidBranch(targetBranch, at: repositoryURL.path) {
-        reason = "目标分支名无效：\(targetBranch)"
+      } else if configuredSourceBranch == configuredTargetBranch {
+        reason = "来源分支与目标分支相同"
       } else {
         reason = nil
       }
@@ -83,8 +117,8 @@ public final class BranchSyncService: Sendable {
         name: name,
         path: path,
         absolutePath: repositoryURL.path,
-        sourceBranch: sourceBranch,
-        targetBranch: targetBranch,
+        sourceBranch: configuredSourceBranch,
+        targetBranch: configuredTargetBranch,
         isWorkspace: false,
         isSelectable: reason == nil,
         unavailableReason: reason
@@ -92,10 +126,10 @@ public final class BranchSyncService: Sendable {
     }
 
     return BranchSyncPreview(
-      projectPath: URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL.path,
-      sourceProjectBranch: sourceProjectBranch,
-      targetProjectBranch: target.branch,
-      targetConfigBranch: target.branch,
+      projectPath: context.projectPath,
+      sourceProjectBranch: context.sourceProjectBranch,
+      targetProjectBranch: targetProjectBranch,
+      targetConfigBranch: targetProjectBranch,
       repositories: repositories
     )
   }
@@ -117,7 +151,6 @@ public final class BranchSyncService: Sendable {
     guard sourceBranch != targetBranch else {
       return result(repository, status: .skipped, message: "来源分支与目标分支相同。")
     }
-
     do {
       guard try processRunner.run("git remote", at: path).split(whereSeparator: \.isNewline).contains("origin") else {
         return result(repository, status: .skipped, message: "仓库没有配置 origin。")
@@ -211,7 +244,7 @@ public final class BranchSyncService: Sendable {
     }
   }
 
-  private func fetchStableConfig(at projectPath: String) throws -> (branch: String, config: ReposConfig) {
+  private func loadRemoteConfig(branch: String, atProjectPath projectPath: String) throws -> ReposConfig {
     let remotes = try processRunner.run("git remote", at: projectPath)
       .split(whereSeparator: \.isNewline)
       .map(String.init)
@@ -219,57 +252,43 @@ public final class BranchSyncService: Sendable {
       throw BranchSyncServiceError.missingOrigin(projectPath)
     }
 
-    let remoteBranches = try processRunner.run(
-      "git ls-remote --heads origin refs/heads/master refs/heads/main",
-      at: projectPath,
-      timeout: 180
-    )
-    let available = Set(remoteBranches.split(whereSeparator: \.isNewline).compactMap { line -> String? in
-      guard let ref = line.split(whereSeparator: \.isWhitespace).last else { return nil }
-      return String(ref).replacing("refs/heads/", with: "")
-    })
-    guard let targetBranch = ["master", "main"].first(where: available.contains) else {
-      throw BranchSyncServiceError.missingStableBranch
-    }
-
     _ = try runChecked(
-      "git fetch origin \(shellEscaped("+refs/heads/\(targetBranch):refs/remotes/origin/\(targetBranch)"))",
+      "git fetch origin \(shellEscaped("+refs/heads/\(branch):refs/remotes/origin/\(branch)"))",
       at: projectPath,
       timeout: 180
     )
 
-    let remoteConfigPath = "refs/remotes/origin/\(targetBranch):fastlane/repos.yml"
+    let remoteConfigPath = "refs/remotes/origin/\(branch):fastlane/repos.yml"
     let configContent: String
     do {
       configContent = try processRunner.run("git show \(shellEscaped(remoteConfigPath))", at: projectPath)
     } catch {
-      throw BranchSyncServiceError.missingRemoteConfig("origin/\(targetBranch)")
+      throw BranchSyncServiceError.missingRemoteConfig("origin/\(branch)")
     }
-    return (targetBranch, try reposService.parseConfig(from: configContent))
-  }
-
-  private func workspaceRepository(
-    projectPath: String,
-    sourceBranch: String,
-    targetBranch: String
-  ) -> BranchSyncRepository {
-    let name = URL(fileURLWithPath: projectPath, isDirectory: true).lastPathComponent
-    let reason = isValidBranch(sourceBranch, at: projectPath) ? nil : "来源分支名无效：\(sourceBranch)"
-    return BranchSyncRepository(
-      name: name,
-      path: ".",
-      absolutePath: URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL.path,
-      sourceBranch: sourceBranch,
-      targetBranch: targetBranch,
-      isWorkspace: true,
-      isSelectable: reason == nil,
-      unavailableReason: reason
-    )
+    return try reposService.parseConfig(from: configContent)
   }
 
   private func currentBranch(at path: String) throws -> String {
     try processRunner.run("git rev-parse --abbrev-ref HEAD", at: path)
       .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func getRemoteBranches(at path: String) throws -> [String] {
+    let remotes = try processRunner.run("git remote", at: path)
+      .split(whereSeparator: \.isNewline)
+      .map(String.init)
+    guard remotes.contains("origin") else {
+      throw BranchSyncServiceError.missingOrigin(path)
+    }
+
+    let output = try processRunner.run("git ls-remote --heads origin", at: path, timeout: 90)
+    return output.split(whereSeparator: \.isNewline).compactMap { line in
+      guard let reference = line.split(whereSeparator: \.isWhitespace).last else { return nil }
+      let prefix = "refs/heads/"
+      guard reference.hasPrefix(prefix) else { return nil }
+      return String(reference.dropFirst(prefix.count))
+    }
+    .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
   }
 
   private func isValidBranch(_ branch: String, at path: String) -> Bool {

@@ -14,11 +14,11 @@ public struct BranchSyncView: View {
       VStack(alignment: .leading, spacing: 16) {
         ToolPageHeader(
           title: "分支同步",
-          subtitle: "主工程同步到远端 master/main；依赖仓库逐个读取两份 repos.yml 的 branch，确定各自来源和目标。",
+          subtitle: "选择主工程的目标分支，再读取该分支的 repos.yml 确认每个依赖仓库的目标分支。",
           systemImage: "arrow.triangle.branch"
         )
 
-        ToolPanel("主工程与配置来源", systemImage: "folder") {
+        ToolPanel("主工程分支", systemImage: "folder") {
           HStack {
             TextField("选择公版主工程目录", text: $viewModel.projectPath)
               .disabled(true)
@@ -29,19 +29,47 @@ public struct BranchSyncView: View {
             }
             .disabled(viewModel.isBusy)
 
-            Button("读取同步范围", systemImage: "arrow.triangle.2.circlepath") {
-              viewModel.loadPreview()
+            Button("读取主工程", systemImage: "arrow.triangle.2.circlepath") {
+              viewModel.loadProjectBranches()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .disabled(viewModel.projectPath.isEmpty || viewModel.isBusy)
           }
 
-          if let preview = viewModel.preview {
-            ToolValueRow("来源配置", value: "当前分支 \(preview.sourceProjectBranch) · fastlane/repos.yml")
-            ToolValueRow("目标配置", value: "origin/\(preview.targetConfigBranch) · fastlane/repos.yml")
-            Text("主工程：\(preview.sourceProjectBranch) → \(preview.targetProjectBranch)。依赖仓库按 path 配对，来源分支取当前配置的 branch，目标分支取 origin/\(preview.targetConfigBranch) 配置的 branch。")
+          if let context = viewModel.projectContext {
+            ToolValueRow("当前分支", value: context.sourceProjectBranch)
+            ToolValueRow("源配置", value: "当前分支 · fastlane/repos.yml")
+
+            HStack {
+              Text("目标分支")
+                .foregroundStyle(.secondary)
+              Picker("主工程目标分支", selection: Binding(
+                get: { viewModel.selectedTargetBranch },
+                set: { viewModel.selectTargetBranch($0) }
+              )) {
+                Text("选择目标分支").tag("")
+                ForEach(context.targetBranches, id: \.self) { branch in
+                  Text(branch).tag(branch)
+                }
+              }
+              .pickerStyle(.menu)
+              .accessibilityLabel("主工程目标分支")
+              .disabled(viewModel.isBusy)
+
+              Button("读取目标配置", systemImage: "doc.text.magnifyingglass") {
+                viewModel.loadTargetConfig()
+              }
+              .buttonStyle(.borderedProminent)
+              .disabled(!viewModel.canLoadTargetConfig)
+            }
+
+            Text("目标分支的 repos.yml 将决定每个依赖仓库的目标分支。分支列表来自主工程 origin。")
               .font(.caption)
               .foregroundStyle(.secondary)
+          }
+
+          if let preview = viewModel.preview {
+            ToolValueRow("目标配置", value: "origin/\(preview.targetConfigBranch) · fastlane/repos.yml")
           }
           if let error = viewModel.errorMessage {
             Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -49,17 +77,21 @@ public struct BranchSyncView: View {
               .textSelection(.enabled)
           }
           if viewModel.isLoading {
-            ProgressView("正在读取两份 repos.yml…")
+            ProgressView(viewModel.loadingMessage ?? "正在读取…")
               .controlSize(.small)
           }
         }
 
-        ToolPanel("选择仓库", systemImage: "shippingbox") {
-          if viewModel.repositories.isEmpty {
+        ToolPanel("选择同步仓库", systemImage: "shippingbox") {
+          if viewModel.preview == nil {
             ContentUnavailableView(
-              "尚未读取同步范围",
+              viewModel.projectContext == nil ? "尚未读取主工程" : "尚未读取目标配置",
               systemImage: "arrow.triangle.branch",
-              description: Text("读取后会按 path 配对当前分支和远端 master/main 分支中的仓库配置。")
+              description: Text(
+                viewModel.projectContext == nil
+                  ? "读取主工程后选择目标分支。"
+                  : "选择主工程目标分支，再读取该分支中的 repos.yml。"
+              )
             )
             .frame(maxWidth: .infinity, minHeight: 140)
           } else {
@@ -116,7 +148,7 @@ public struct BranchSyncView: View {
       }
       Button("取消", role: .cancel) {}
     } message: {
-      Text("会将来源分支合并到各仓库的目标分支并推送到 origin。有未提交修改的仓库会跳过；合并冲突会中止该仓库并继续处理其他仓库。")
+      Text("主工程：\(viewModel.preview?.sourceProjectBranch ?? "") → origin/\(viewModel.selectedTargetBranch)。依赖仓库按当前分支与所选目标分支的 repos.yml 配置同步。有未提交修改的仓库会跳过；合并冲突会中止该仓库并继续处理其他仓库。")
     }
   }
 }
@@ -136,7 +168,7 @@ private struct BranchSyncRepositoryRow: View {
           Label(repository.name, systemImage: repository.isWorkspace ? "building.2" : "folder")
         }
         .toggleStyle(.checkbox)
-        .disabled(viewModel.isBusy || !repository.isSelectable)
+        .disabled(viewModel.isBusy || !repository.canSync)
 
         Spacer()
         if let result {
@@ -150,9 +182,9 @@ private struct BranchSyncRepositoryRow: View {
           .foregroundStyle(.tertiary)
         Text("目标分支：\(repository.targetBranch ?? "未配置")")
       }
-        .font(.system(.caption, design: .monospaced))
-        .foregroundStyle(.secondary)
-        .textSelection(.enabled)
+      .font(.system(.caption, design: .monospaced))
+      .foregroundStyle(.secondary)
+      .textSelection(.enabled)
 
       Text("仓库路径：\(repository.absolutePath)")
         .font(.system(.caption, design: .monospaced))

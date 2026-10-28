@@ -31,6 +31,33 @@ public struct BranchSyncRepository: Identifiable, Equatable, Sendable {
   }
 
   public var id: String { isWorkspace ? "workspace" : path }
+
+  public var canSync: Bool { isSelectable && sourceBranch != nil && targetBranch != nil }
+}
+
+public struct BranchSyncProjectContext: Sendable {
+  public let projectPath: String
+  public let sourceProjectBranch: String
+  public let sourceConfig: ReposConfig
+  public let sourceRootPath: String
+  public let targetBranches: [String]
+  public let defaultTargetBranch: String?
+
+  public init(
+    projectPath: String,
+    sourceProjectBranch: String,
+    sourceConfig: ReposConfig,
+    sourceRootPath: String,
+    targetBranches: [String],
+    defaultTargetBranch: String?
+  ) {
+    self.projectPath = projectPath
+    self.sourceProjectBranch = sourceProjectBranch
+    self.sourceConfig = sourceConfig
+    self.sourceRootPath = sourceRootPath
+    self.targetBranches = targetBranches
+    self.defaultTargetBranch = defaultTargetBranch
+  }
 }
 
 public struct BranchSyncPreview: Equatable, Sendable {

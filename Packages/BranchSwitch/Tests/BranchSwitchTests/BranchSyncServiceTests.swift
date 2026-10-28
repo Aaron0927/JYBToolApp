@@ -15,12 +15,25 @@ final class BranchSyncServiceTests: XCTestCase {
     try FileManager.default.removeItem(at: temporaryDirectory)
   }
 
-  func testPreviewUsesCurrentAndRemoteStableReposConfigsByRepositoryPath() throws {
+  func testProjectContextReadsOnlyMainProjectRemoteBranches() throws {
     let fixture = try makeFixture()
 
-    let preview = try BranchSyncService().loadPreview(atProjectPath: fixture.project.path)
+    let context = try BranchSyncService().loadProjectContext(atProjectPath: fixture.project.path)
 
-    XCTAssertEqual(preview.sourceProjectBranch, "develop")
+    XCTAssertEqual(context.sourceProjectBranch, "develop")
+    XCTAssertEqual(context.targetBranches, ["master", "release"])
+    XCTAssertEqual(context.defaultTargetBranch, "master")
+    XCTAssertEqual(context.sourceConfig.repos.first?.branch, "develop")
+    XCTAssertEqual(try runGit("branch --show-current", at: fixture.project), "develop")
+  }
+
+  func testSelectedMainProjectBranchReposConfigSetsDependencyTargetBranches() throws {
+    let fixture = try makeFixture()
+    let service = BranchSyncService()
+    let context = try service.loadProjectContext(atProjectPath: fixture.project.path)
+
+    let preview = try service.loadPreview(for: context, targetProjectBranch: "master")
+
     XCTAssertEqual(preview.targetProjectBranch, "master")
     XCTAssertEqual(preview.targetConfigBranch, "master")
     XCTAssertEqual(try runGit("branch --show-current", at: fixture.project), "develop")
@@ -28,38 +41,50 @@ final class BranchSyncServiceTests: XCTestCase {
     let dependency = try XCTUnwrap(preview.repositories.first { $0.path == "Dependency" })
     XCTAssertEqual(dependency.sourceBranch, "develop")
     XCTAssertEqual(dependency.targetBranch, "main")
-    XCTAssertTrue(dependency.isSelectable)
-    XCTAssertEqual(dependency.name, "Dependency", "按 path 配对；使用当前分支配置中的仓库名称")
-    XCTAssertEqual(dependency.absolutePath, fixture.dependency.path)
+    XCTAssertTrue(dependency.canSync)
+    XCTAssertEqual(dependency.name, "Dependency", "按 path 配对，保留来源配置中的仓库名称")
 
-    let stableOnly = try XCTUnwrap(preview.repositories.first { $0.path == "StableOnly" })
-    XCTAssertFalse(stableOnly.isSelectable)
-    XCTAssertEqual(stableOnly.unavailableReason, "当前分支的 repos.yml 未声明此仓库")
-
-    let workspace = try XCTUnwrap(preview.repositories.first { $0.isWorkspace })
-    XCTAssertEqual(workspace.sourceBranch, "develop")
-    XCTAssertEqual(workspace.targetBranch, "master")
+    let targetOnly = try XCTUnwrap(preview.repositories.first { $0.path == "StableOnly" })
+    XCTAssertFalse(targetOnly.canSync)
+    XCTAssertEqual(targetOnly.unavailableReason, "当前分支的 repos.yml 未声明此仓库")
   }
 
-  func testSyncMergesLocalSourceBranchIntoConfiguredTargetAndPushes() throws {
+  func testChosenTargetBranchLoadsItsOwnReposConfig() throws {
     let fixture = try makeFixture()
-    let preview = try BranchSyncService().loadPreview(atProjectPath: fixture.project.path)
+    let service = BranchSyncService()
+    let context = try service.loadProjectContext(atProjectPath: fixture.project.path)
+
+    let preview = try service.loadPreview(for: context, targetProjectBranch: "release")
+
+    let dependency = try XCTUnwrap(preview.repositories.first { $0.path == "Dependency" })
+    XCTAssertEqual(dependency.sourceBranch, "develop")
+    XCTAssertEqual(dependency.targetBranch, "release")
+    XCTAssertEqual(preview.targetConfigBranch, "release")
+  }
+
+  func testSyncMergesConfiguredSourceBranchIntoSelectedTargetAndPushes() throws {
+    let fixture = try makeFixture()
+    let service = BranchSyncService()
+    let context = try service.loadProjectContext(atProjectPath: fixture.project.path)
+    let preview = try service.loadPreview(for: context, targetProjectBranch: "master")
     let dependency = try XCTUnwrap(preview.repositories.first { $0.path == "Dependency" })
 
-    let result = BranchSyncService().sync(dependency)
+    let result = service.sync(dependency)
 
     XCTAssertEqual(result.status, .success, result.message)
     XCTAssertEqual(try runGit("branch --show-current", at: fixture.dependency), "develop")
+    XCTAssertEqual(try runGit("show origin/main:source.txt", at: fixture.dependency), "development commit")
     XCTAssertEqual(
-      try runGit("show origin/main:source.txt", at: fixture.dependency),
-      "development commit"
+      try runGit("rev-parse main", at: fixture.dependency),
+      try runGit("rev-parse origin/main", at: fixture.dependency)
     )
-    XCTAssertEqual(try runGit("rev-parse main", at: fixture.dependency), try runGit("rev-parse origin/main", at: fixture.dependency))
   }
 
   func testSyncSkipsDirtyRepository() throws {
     let fixture = try makeFixture()
-    let preview = try BranchSyncService().loadPreview(atProjectPath: fixture.project.path)
+    let service = BranchSyncService()
+    let context = try service.loadProjectContext(atProjectPath: fixture.project.path)
+    let preview = try service.loadPreview(for: context, targetProjectBranch: "master")
     let dependency = try XCTUnwrap(preview.repositories.first { $0.path == "Dependency" })
     try "local edit".write(
       to: fixture.dependency.appending(path: "dirty.txt"),
@@ -67,21 +92,21 @@ final class BranchSyncServiceTests: XCTestCase {
       encoding: .utf8
     )
 
-    let result = BranchSyncService().sync(dependency)
+    let result = service.sync(dependency)
 
     XCTAssertEqual(result.status, .skipped)
     XCTAssertEqual(result.message, "工作区有未提交修改。")
     XCTAssertEqual(try runGit("branch --show-current", at: fixture.dependency), "develop")
   }
 
-  func testPreviewFallsBackToRemoteMainWhenMasterIsMissing() throws {
+  func testDefaultTargetBranchFallsBackToMainWhenMasterIsMissing() throws {
     let fixture = try makeFixture(projectStableBranch: "main")
 
-    let preview = try BranchSyncService().loadPreview(atProjectPath: fixture.project.path)
+    let context = try BranchSyncService().loadProjectContext(atProjectPath: fixture.project.path)
 
-    XCTAssertEqual(preview.sourceProjectBranch, "develop")
-    XCTAssertEqual(preview.targetProjectBranch, "main")
-    XCTAssertEqual(preview.targetConfigBranch, "main")
+    XCTAssertEqual(context.sourceProjectBranch, "develop")
+    XCTAssertEqual(context.defaultTargetBranch, "main")
+    XCTAssertTrue(context.targetBranches.contains("release"))
   }
 
   private func makeFixture(projectStableBranch: String = "master") throws -> BranchSyncFixture {
@@ -109,7 +134,14 @@ final class BranchSyncServiceTests: XCTestCase {
     try runGit("commit -m 'Stable project config'", at: project)
     try runGit("remote add origin \(quote(projectRemote.path))", at: project)
     try runGit("push -u origin \(projectStableBranch)", at: project)
-    try runGit("checkout -b develop", at: project)
+
+    try runGit("checkout -b release", at: project)
+    try writeProjectConfig(in: project, dependencyBranch: "release", dependencyRemote: dependencyRemote)
+    try runGit("add fastlane/repos.yml", at: project)
+    try runGit("commit -m 'Release project config'", at: project)
+    try runGit("push -u origin release", at: project)
+
+    try runGit("checkout -b develop \(projectStableBranch)", at: project)
     try writeProjectConfig(in: project, dependencyBranch: "develop", dependencyRemote: dependencyRemote)
     try runGit("add fastlane/repos.yml", at: project)
     try runGit("commit -m 'Development project config'", at: project)
@@ -122,12 +154,14 @@ final class BranchSyncServiceTests: XCTestCase {
     try runGit("commit -m 'Stable dependency'", at: dependency)
     try runGit("remote add origin \(quote(dependencyRemote.path))", at: dependency)
     try runGit("push -u origin main", at: dependency)
-    try runGit("checkout -b develop", at: dependency)
+    try runGit("checkout -b release", at: dependency)
+    try runGit("push -u origin release", at: dependency)
+    try runGit("checkout -b develop main", at: dependency)
     try "development commit".write(to: dependency.appending(path: "source.txt"), atomically: true, encoding: .utf8)
     try runGit("add source.txt", at: dependency)
     try runGit("commit -m 'Development dependency'", at: dependency)
 
-    return BranchSyncFixture(project: project, dependency: dependency, dependencyRemote: dependencyRemote)
+    return BranchSyncFixture(project: project, dependency: dependency)
   }
 
   private func writeProjectConfig(
@@ -177,5 +211,4 @@ final class BranchSyncServiceTests: XCTestCase {
 private struct BranchSyncFixture {
   let project: URL
   let dependency: URL
-  let dependencyRemote: URL
 }
