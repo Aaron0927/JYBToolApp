@@ -14,7 +14,7 @@ public struct BranchSyncView: View {
       VStack(alignment: .leading, spacing: 16) {
         ToolPageHeader(
           title: "分支同步",
-          subtitle: "按主工程当前分支与 master/main 分支各自的 repos.yml，合并对应仓库分支并推送到 origin。",
+          subtitle: "主工程同步到远端 master/main；依赖仓库逐个读取两份 repos.yml 的 branch，确定各自来源和目标。",
           systemImage: "arrow.triangle.branch"
         )
 
@@ -39,7 +39,7 @@ public struct BranchSyncView: View {
           if let preview = viewModel.preview {
             ToolValueRow("来源配置", value: "当前分支 \(preview.sourceProjectBranch) · fastlane/repos.yml")
             ToolValueRow("目标配置", value: "origin/\(preview.targetConfigBranch) · fastlane/repos.yml")
-            Text("主工程同步到 \(preview.targetProjectBranch)；依赖仓库按两份配置中的 path 配对。")
+            Text("主工程：\(preview.sourceProjectBranch) → \(preview.targetProjectBranch)。依赖仓库按 path 配对，来源分支取当前配置的 branch，目标分支取 origin/\(preview.targetConfigBranch) 配置的 branch。")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
@@ -144,7 +144,17 @@ private struct BranchSyncRepositoryRow: View {
         }
       }
 
-      Text("\(repository.sourceBranch ?? "未配置") → \(repository.targetBranch ?? "未配置") · \(repository.absolutePath)")
+      HStack(spacing: 12) {
+        Text("来源分支：\(repository.sourceBranch ?? "未配置")")
+        Image(systemName: "arrow.right")
+          .foregroundStyle(.tertiary)
+        Text("目标分支：\(repository.targetBranch ?? "未配置")")
+      }
+        .font(.system(.caption, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+
+      Text("仓库路径：\(repository.absolutePath)")
         .font(.system(.caption, design: .monospaced))
         .foregroundStyle(.secondary)
         .textSelection(.enabled)

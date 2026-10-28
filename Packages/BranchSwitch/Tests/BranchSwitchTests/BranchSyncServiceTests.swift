@@ -29,6 +29,7 @@ final class BranchSyncServiceTests: XCTestCase {
     XCTAssertEqual(dependency.sourceBranch, "develop")
     XCTAssertEqual(dependency.targetBranch, "main")
     XCTAssertTrue(dependency.isSelectable)
+    XCTAssertEqual(dependency.name, "Dependency", "按 path 配对；使用当前分支配置中的仓库名称")
     XCTAssertEqual(dependency.absolutePath, fixture.dependency.path)
 
     let stableOnly = try XCTUnwrap(preview.repositories.first { $0.path == "StableOnly" })
@@ -101,6 +102,7 @@ final class BranchSyncServiceTests: XCTestCase {
       in: project,
       dependencyBranch: "main",
       dependencyRemote: dependencyRemote,
+      dependencyName: "StableDependency",
       includeStableOnly: true
     )
     try runGit("add fastlane/repos.yml", at: project)
@@ -132,6 +134,7 @@ final class BranchSyncServiceTests: XCTestCase {
     in project: URL,
     dependencyBranch: String,
     dependencyRemote: URL,
+    dependencyName: String = "Dependency",
     includeStableOnly: Bool = false
   ) throws {
     let stableOnlyEntry = includeStableOnly
@@ -145,7 +148,7 @@ final class BranchSyncServiceTests: XCTestCase {
     let config = """
     root: ../..
     repos:
-      - name: Dependency
+      - name: \(dependencyName)
         url: \(dependencyRemote.path)
         path: Dependency
         branch: \(dependencyBranch)
