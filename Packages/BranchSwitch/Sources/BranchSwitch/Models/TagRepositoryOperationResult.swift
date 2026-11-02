@@ -2,6 +2,7 @@ import Foundation
 
 public enum TagRepositoryOperationStatus: Equatable, Sendable {
   case success
+  case skipped
   case pushFailed
   case failed
 }

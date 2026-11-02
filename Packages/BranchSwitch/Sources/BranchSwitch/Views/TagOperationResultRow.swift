@@ -25,6 +25,7 @@ struct TagOperationResultRow: View {
   private var statusTitle: String {
     switch result.status {
     case .success: "成功"
+    case .skipped: "已跳过"
     case .pushFailed: "待重试推送"
     case .failed: "失败"
     }
@@ -33,6 +34,7 @@ struct TagOperationResultRow: View {
   private var statusKind: ToolStatusBadge.Kind {
     switch result.status {
     case .success: .success
+    case .skipped: .neutral
     case .pushFailed: .warning
     case .failed: .failure
     }

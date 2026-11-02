@@ -437,6 +437,87 @@ final class ReposYAMLServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testTagManagementDeletesMainAndSelectedDependencyTagsAndSkipsMissingTags() async throws {
+    let fixture = try makePullFixture(rootIsParent: true)
+    let service = ReposYAMLService()
+    let tagName = "v1.0.0-synchronized-delete"
+    let dependencyOnlyTag = "v1.0.0-dependency-only"
+    for repository in [fixture.project, fixture.dependency] {
+      try service.createTag(tagName, message: "Shared release", at: repository.path)
+      try service.pushTag(tagName, at: repository.path)
+    }
+    try service.createTag(dependencyOnlyTag, message: "Dependency only", at: fixture.dependency.path)
+    try service.pushTag(dependencyOnlyTag, at: fixture.dependency.path)
+
+    let viewModel = TagManagementViewModel()
+    viewModel.projectPath = fixture.project.path
+    viewModel.loadRepositories()
+    let loadDeadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < loadDeadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    XCTAssertTrue(viewModel.availableTags.contains { $0.name == tagName })
+    XCTAssertFalse(viewModel.availableTags.contains { $0.name == dependencyOnlyTag })
+    let workspace = try XCTUnwrap(viewModel.repositories.first { $0.scope == .workspace })
+    let dependency = try XCTUnwrap(viewModel.repositories.first { $0.scope == .dependency })
+    XCTAssertTrue(viewModel.selectedRepositoryIDs.contains(dependency.id), "依赖仓库读取后默认全选")
+
+    let missingRepositoryPath = temporaryDirectory.appending(path: "dependency-without-tag", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: missingRepositoryPath, withIntermediateDirectories: true)
+    try runGit("init", at: missingRepositoryPath)
+    let missingRepository = RepoSwitchInfo(
+      name: "NoTag",
+      path: "NoTag",
+      absolutePath: missingRepositoryPath.path,
+      currentBranch: "未提交",
+      targetBranch: "main",
+      isCloned: true
+    )
+    viewModel.repositories.append(missingRepository)
+    viewModel.selectedRepositoryIDs.insert(missingRepository.id)
+    viewModel.selectedTagName = tagName
+
+    viewModel.deleteTag(tagName, dependencyRepositoryIDs: viewModel.selectedRepositoryIDs)
+    let deleteDeadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < deleteDeadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    XCTAssertEqual(viewModel.operationResults.map(\.repositoryName), ["TradeBook", "Dependency", "NoTag"])
+    XCTAssertEqual(viewModel.operationResults.map(\.status), [.success, .success, .skipped])
+    XCTAssertFalse(try service.loadTags(at: fixture.project.path).tags.contains { $0.name == tagName })
+    XCTAssertFalse(try service.loadTags(at: fixture.dependency.path).tags.contains { $0.name == tagName })
+    XCTAssertTrue(try service.loadTags(at: fixture.dependency.path).tags.contains { $0.name == dependencyOnlyTag })
+    XCTAssertNil(viewModel.selectedTagName, "主仓库删除后应清除已删除的 Tag 选择")
+
+    for repository in [fixture.project, fixture.dependency] {
+      try service.createTag(tagName, message: "Shared release", at: repository.path)
+      try service.pushTag(tagName, at: repository.path)
+    }
+    viewModel.reloadTags()
+    let refreshDeadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < refreshDeadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+    viewModel.selectedTagName = tagName
+    viewModel.setRepository(workspace.id, selected: false)
+    viewModel.setRepository(dependency.id, selected: false)
+    viewModel.setRepository(missingRepository.id, selected: false)
+
+    viewModel.deleteTag(tagName, dependencyRepositoryIDs: viewModel.selectedRepositoryIDs)
+    let mainOnlyDeleteDeadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < mainOnlyDeleteDeadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    XCTAssertEqual(viewModel.operationResults.map(\.repositoryName), ["TradeBook"], "主仓库固定参与删除")
+    XCTAssertEqual(viewModel.operationResults.map(\.status), [.success])
+    XCTAssertFalse(try service.loadTags(at: fixture.project.path).tags.contains { $0.name == tagName })
+    XCTAssertTrue(try service.loadTags(at: fixture.dependency.path).tags.contains { $0.name == tagName })
+  }
+
+  @MainActor
   func testTagBatchPushesInBackgroundAndKeepsPushResultsInLogs() async throws {
     let remote = temporaryDirectory.appending(path: "tag-batch-remote.git", directoryHint: .isDirectory)
     let successfulRepository = temporaryDirectory.appending(path: "tag-batch-success", directoryHint: .isDirectory)

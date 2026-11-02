@@ -17,7 +17,7 @@ public struct TagManagementView: View {
       VStack(alignment: .leading, spacing: 16) {
         ToolPageHeader(
           title: "Tag 管理",
-          subtitle: "读取仓库后默认全选，可调整目标；设置 Tag 时输入名称，可选填附注说明。",
+          subtitle: "读取主仓库 Tag 列表，可设置 Tag 或同步删除主仓库和所选依赖仓库中的同名 Tag。",
           systemImage: "tag"
         )
 
@@ -32,7 +32,7 @@ public struct TagManagementView: View {
             }
             .disabled(viewModel.isBusy)
 
-            Button("读取仓库", systemImage: "doc.text.magnifyingglass") {
+            Button("读取仓库和 Tag", systemImage: "doc.text.magnifyingglass") {
               viewModel.loadRepositories()
             }
             .buttonStyle(.bordered)
@@ -40,7 +40,7 @@ public struct TagManagementView: View {
           }
 
           if viewModel.isLoading {
-            ProgressView("正在读取仓库列表…")
+            ProgressView("正在读取仓库和主仓库 Tag…")
               .controlSize(.small)
           } else if viewModel.repositories.isEmpty, let error = viewModel.errorMessage {
             Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -51,9 +51,14 @@ public struct TagManagementView: View {
               .font(.caption)
               .foregroundStyle(.secondary)
           } else {
-            Text("已读取 \(viewModel.repositories.count) 个仓库，默认全选；可在下方列表调整操作目标。")
+            Text("已读取 \(viewModel.repositories.count) 个仓库和 \(viewModel.availableTags.count) 个主仓库 Tag；依赖仓库默认全选。")
               .font(.caption)
               .foregroundStyle(.secondary)
+          }
+          if let tagLoadError = viewModel.tagLoadErrorMessage {
+            Label("读取主仓库 Tag 失败：\(tagLoadError)", systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.orange)
+              .textSelection(.enabled)
           }
         }
 
@@ -75,6 +80,47 @@ public struct TagManagementView: View {
             .disabled(viewModel.isBusy || viewModel.selectedRepositoryIDs.isEmpty)
           }
 
+          Divider()
+
+          HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("删除 Tag")
+                .font(.headline)
+              Text(deletionHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Picker("选择 Tag", selection: $viewModel.selectedTagName) {
+              Text("选择 Tag").tag(Optional<String>.none)
+              ForEach(viewModel.availableTags) { tag in
+                Text(tag.name).tag(Optional(tag.name))
+              }
+            }
+            .frame(maxWidth: 240)
+            .disabled(viewModel.isBusy || viewModel.availableTags.isEmpty)
+
+            Button("删除 Tag", systemImage: "trash", role: .destructive) {
+              guard let tagName = viewModel.selectedTagName else { return }
+              let dependencies = viewModel.selectedDeletionRepositories
+              pendingAction = .deleteTag(
+                tagName,
+                Set(dependencies.map(\.id)),
+                viewModel.deletionTargets.map(\.name)
+              )
+              isShowingConfirmation = true
+            }
+            .disabled(!viewModel.canDeleteTag)
+          }
+
+          if viewModel.availableTags.isEmpty,
+             !viewModel.repositories.isEmpty,
+             viewModel.tagLoadErrorMessage == nil {
+            Text("主仓库没有可读取的本地或远程 Tag。")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
           if viewModel.isWorking, let progress = viewModel.operationProgress {
             ProgressView(progress)
               .controlSize(.small)
@@ -90,7 +136,7 @@ public struct TagManagementView: View {
 
           if !viewModel.operationResults.isEmpty {
             Divider()
-            Text("逐仓创建结果")
+            Text("逐仓操作结果")
               .font(.headline)
             VStack(alignment: .leading, spacing: 8) {
               ForEach(viewModel.operationResults) { result in
@@ -162,19 +208,16 @@ public struct TagManagementView: View {
       titleVisibility: .visible
     ) {
       if let pendingAction {
-        Button(pendingAction.confirmationTitle) {
-          switch pendingAction {
-          case .createTag(let name, let message, let pushToRemote, let repositoryIDs, _):
-            viewModel.createAndPushTag(
-              name: name,
-              message: message,
-              repositoryIDs: repositoryIDs,
-              pushToRemote: pushToRemote
-            )
+        if pendingAction.isDestructive {
+          Button(pendingAction.confirmationTitle, role: .destructive) {
+            perform(pendingAction)
           }
-          self.pendingAction = nil
+        } else {
+          Button(pendingAction.confirmationTitle) {
+            perform(pendingAction)
+          }
+          .keyboardShortcut(.defaultAction)
         }
-        .keyboardShortcut(.defaultAction)
       }
       Button("取消", role: .cancel) {
         pendingAction = nil
@@ -189,6 +232,28 @@ public struct TagManagementView: View {
       return "请先在下方仓库列表选择一个或多个仓库。"
     }
     return "将为下方选中的 \(viewModel.selectedRepositoryIDs.count) 个仓库统一创建同一个 Tag；勾选远程推送后会在后台执行，结果见执行日志。"
+  }
+
+  private var deletionHint: String {
+    guard let tagName = viewModel.selectedTagName else {
+      return "先从主仓库 Tag 列表选择 Tag；主仓库固定参与，依赖仓库按下方勾选项处理。"
+    }
+    return "将删除「\(tagName)」；主仓库固定参与，所选 \(viewModel.selectedDeletionRepositories.count) 个依赖仓库同步处理，不存在的 Tag 会跳过。"
+  }
+
+  private func perform(_ action: PendingTagAction) {
+    switch action {
+    case .createTag(let name, let message, let pushToRemote, let repositoryIDs, _):
+      viewModel.createAndPushTag(
+        name: name,
+        message: message,
+        repositoryIDs: repositoryIDs,
+        pushToRemote: pushToRemote
+      )
+    case .deleteTag(let name, let dependencyRepositoryIDs, _):
+      viewModel.deleteTag(name, dependencyRepositoryIDs: dependencyRepositoryIDs)
+    }
+    pendingAction = nil
   }
 
   @ViewBuilder
@@ -215,15 +280,21 @@ public struct TagManagementView: View {
 
 private enum PendingTagAction {
   case createTag(String, String, Bool, Set<String>, [String])
+  case deleteTag(String, Set<String>, [String])
 
   var requiresPostInputConfirmation: Bool {
     if case .createTag = self { true } else { false }
+  }
+
+  var isDestructive: Bool {
+    if case .deleteTag = self { true } else { false }
   }
 
   var title: String {
     switch self {
     case .createTag(_, _, true, _, _): "确认创建 Tag 并在后台推送？"
     case .createTag: "确认仅创建本地 Tag？"
+    case .deleteTag(let name, _, _): "确认同步删除 Tag「\(name)」？"
     }
   }
 
@@ -231,6 +302,7 @@ private enum PendingTagAction {
     switch self {
     case .createTag(_, _, true, _, _): "创建并后台推送"
     case .createTag: "仅创建 Tag"
+    case .deleteTag: "删除 Tag"
     }
   }
 
@@ -240,6 +312,8 @@ private enum PendingTagAction {
       "将在 \(repositoryNames.count) 个仓库的当前 HEAD 创建 annotated Tag「\(name)」，本地创建完成后在后台推送到 origin。仓库：\(repositoryNames.joined(separator: "、"))。附注说明：\(message.isEmpty ? "未填写" : message)"
     case .createTag(let name, let message, false, _, let repositoryNames):
       "将在 \(repositoryNames.count) 个仓库的当前 HEAD 创建 annotated Tag「\(name)」，仅保留在本地，不推送到远程。仓库：\(repositoryNames.joined(separator: "、"))。附注说明：\(message.isEmpty ? "未填写" : message)"
+    case .deleteTag(let name, let dependencyRepositoryIDs, let repositoryNames):
+      "将从主仓库和 \(dependencyRepositoryIDs.count) 个所选依赖仓库中删除同名 Tag「\(name)」，并删除各仓库存在的本地和远程 Tag；不存在时会跳过。目标：\(repositoryNames.joined(separator: "、"))。"
     }
   }
 }
