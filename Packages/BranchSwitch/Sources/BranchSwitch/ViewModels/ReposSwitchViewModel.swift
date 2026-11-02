@@ -7,6 +7,18 @@ import AppKit
 import Foundation
 import JYBLog
 
+public enum RepoSwitchTargetMode: String, CaseIterable, Sendable {
+  case branch
+  case tag
+
+  public var title: String {
+    switch self {
+    case .branch: "分支"
+    case .tag: "Tag"
+    }
+  }
+}
+
 @Observable
 @MainActor
 public final class ReposSwitchViewModel {
@@ -14,11 +26,26 @@ public final class ReposSwitchViewModel {
   private static let maxConcurrentRepoSwitchCount = 6
 
   public var projectPath: String = ""
+  public var targetMode: RepoSwitchTargetMode = .branch {
+    didSet {
+      guard targetMode != oldValue else { return }
+      currentTask?.cancel()
+      resetLoadedConfig()
+      availableTags = []
+      selectedTagName = nil
+      tagLoadErrorMessage = nil
+      isTagPreviewLoaded = false
+    }
+  }
   public var configPath: String = ""
   public var rootPath: String = ""
   public var localBranches: [String] = []
   public var currentBranch: String = ""
   public var selectedBranch: String = ""
+  public var availableTags: [GitTagInfo] = []
+  public var selectedTagName: String?
+  public var tagLoadErrorMessage: String?
+  public var isTagPreviewLoaded = false
   public var repos: [RepoSwitchInfo] = []
   public var isLoading = false
   public var isSwitching = false
@@ -60,6 +87,35 @@ public final class ReposSwitchViewModel {
 
   public var isBusy: Bool {
     isLoading || isSwitching || isPulling
+  }
+
+  public var displayedRepos: [RepoSwitchInfo] {
+    guard targetMode == .tag else { return repos }
+    let targetTag = selectedTagName ?? "选择 Tag"
+    return repos.map { repo in
+      RepoSwitchInfo(
+        name: repo.name,
+        path: repo.path,
+        absolutePath: repo.absolutePath,
+        currentBranch: repo.currentBranch,
+        targetBranch: targetTag,
+        isCloned: repo.isCloned,
+        scope: repo.scope
+      )
+    }
+  }
+
+  public var canConfirmSwitch: Bool {
+    guard !isBusy, !repos.isEmpty, loadedConfig != nil else { return false }
+    switch targetMode {
+    case .branch:
+      return isConfirmEnabled
+    case .tag:
+      guard isTagPreviewLoaded,
+            let selectedTagName
+      else { return false }
+      return availableTags.contains { $0.name == selectedTagName }
+    }
   }
 
   public var isAllPullRepositoriesSelected: Bool {
@@ -179,6 +235,60 @@ public final class ReposSwitchViewModel {
     }
   }
 
+  public func loadTagSwitchData() {
+    guard !projectPath.isEmpty else { return }
+    currentTask?.cancel()
+    isLoading = true
+    isConfirmEnabled = false
+    isTagPreviewLoaded = false
+    loadErrorMessage = nil
+    tagLoadErrorMessage = nil
+    configPath = service.configURL(forProjectPath: projectPath).path
+    LogManager.shared.info("正在读取主仓库配置和 Tag 列表…")
+
+    let currentProjectPath = projectPath
+    currentTask = Task { @MainActor in
+      let result = await Task.detached { () -> TagSwitchLoadResult in
+        do {
+          let service = ReposYAMLService()
+          let loaded = try service.loadRepoInfos(atProjectPath: currentProjectPath)
+          let currentBranch = service.getCurrentBranch(at: currentProjectPath) ?? ""
+          let workspaceInfo = service.makeWorkspaceRepoInfo(
+            rootPath: currentProjectPath,
+            targetBranch: "选择 Tag"
+          )
+          let tagResult: (tags: [GitTagInfo], error: String?)
+          do {
+            tagResult = (try service.loadTags(at: currentProjectPath).tags, nil)
+          } catch {
+            tagResult = ([], error.localizedDescription)
+          }
+          return TagSwitchLoadResult(
+            config: loaded.config,
+            rootPath: loaded.rootPath,
+            repos: [workspaceInfo] + loaded.infos,
+            tags: tagResult.tags,
+            currentBranch: currentBranch,
+            error: nil,
+            tagError: tagResult.error
+          )
+        } catch {
+          return TagSwitchLoadResult(
+            config: nil,
+            rootPath: "",
+            repos: [],
+            tags: [],
+            currentBranch: "",
+            error: error.localizedDescription,
+            tagError: nil
+          )
+        }
+      }.value
+
+      finishTagSwitchLoad(result)
+    }
+  }
+
   public func loadPullPreview() {
     guard !projectPath.isEmpty else { return }
     currentTask?.cancel()
@@ -223,6 +333,10 @@ public final class ReposSwitchViewModel {
 
   public func switchRepos() {
     guard let loadedConfig, !projectPath.isEmpty else { return }
+    if targetMode == .tag {
+      switchReposToTag(using: loadedConfig)
+      return
+    }
     currentTask?.cancel()
     isSwitching = true
     isConfirmEnabled = false
@@ -300,7 +414,84 @@ public final class ReposSwitchViewModel {
         return orderedResults
       }.value
 
-      finishSwitch(results)
+      finishSwitch(results, targetMode: .branch, targetName: workspaceTargetBranch)
+    }
+  }
+
+  private func switchReposToTag(using config: ReposConfig) {
+    guard let selectedTagName,
+          availableTags.contains(where: { $0.name == selectedTagName }),
+          isTagPreviewLoaded
+    else { return }
+
+    currentTask?.cancel()
+    isSwitching = true
+    isConfirmEnabled = false
+    operationSummary = nil
+    operationResults = [:]
+    operationDetails = [:]
+    LogManager.shared.info("========== 开始公版仓库 Tag 切换：\(selectedTagName) ==========")
+    LogManager.shared.info("主仓库固定参与；依赖仓库并发切换，最大并发数：\(Self.maxConcurrentRepoSwitchCount)")
+
+    let tag = selectedTagName
+    let projectDirectory = projectPath
+    let currentConfigURL = service.configURL(forProjectPath: projectPath)
+    let maxConcurrentCount = Self.maxConcurrentRepoSwitchCount
+    currentTask = Task { @MainActor in
+      let results = await Task.detached { () async -> [RepoSwitchResult] in
+        let service = ReposYAMLService()
+        let rootURL = service.rootURL(for: config, configURL: currentConfigURL)
+        let workspaceName = URL(fileURLWithPath: projectDirectory, isDirectory: true)
+          .standardizedFileURL
+          .lastPathComponent
+        let workspaceResult = service.updateExistingRepoToTag(
+          name: workspaceName,
+          path: projectDirectory,
+          tag: tag
+        ) { message in
+          Task { @MainActor in
+            LogManager.shared.debug(message)
+          }
+        }
+
+        let dependencyResults = await withTaskGroup(of: (Int, RepoSwitchResult).self) { group in
+          let indexedRepos = Array(config.repos.enumerated())
+          var nextIndex = 0
+          var results: [(Int, RepoSwitchResult)] = []
+
+          func addNextRepoIfNeeded() {
+            guard nextIndex < indexedRepos.count else { return }
+            let indexedRepo = indexedRepos[nextIndex]
+            nextIndex += 1
+            group.addTask {
+              let repoService = ReposYAMLService()
+              let result = repoService.updateRepoToTag(
+                indexedRepo.element,
+                rootURL: rootURL,
+                tag: tag
+              ) { message in
+                Task { @MainActor in
+                  LogManager.shared.debug(message)
+                }
+              }
+              return (indexedRepo.offset, result)
+            }
+          }
+
+          for _ in 0..<min(maxConcurrentCount, indexedRepos.count) {
+            addNextRepoIfNeeded()
+          }
+          for await result in group {
+            results.append(result)
+            addNextRepoIfNeeded()
+          }
+          return results.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+
+        return [workspaceResult] + dependencyResults
+      }.value
+
+      finishSwitch(results, targetMode: .tag, targetName: tag)
     }
   }
 
@@ -403,6 +594,47 @@ public final class ReposSwitchViewModel {
     }
   }
 
+  private func finishTagSwitchLoad(_ result: TagSwitchLoadResult) {
+    isLoading = false
+    currentTask = nil
+
+    if let error = result.error {
+      loadedConfig = nil
+      repos = []
+      rootPath = ""
+      availableTags = []
+      isConfirmEnabled = false
+      isTagPreviewLoaded = false
+      loadErrorMessage = error
+      tagLoadErrorMessage = nil
+      LogManager.shared.error("读取 Tag 切换所需的仓库配置失败：\(error)")
+      return
+    }
+
+    loadedConfig = result.config
+    loadErrorMessage = nil
+    rootPath = result.rootPath
+    repos = result.repos
+    availableTags = result.tags
+    tagLoadErrorMessage = result.tagError
+    currentBranch = result.currentBranch
+    isConfirmEnabled = !repos.isEmpty
+    isTagPreviewLoaded = !repos.isEmpty
+    isPullPreviewLoaded = false
+    if let selectedTagName,
+       !availableTags.contains(where: { $0.name == selectedTagName }) {
+      self.selectedTagName = nil
+    }
+    saveLastProjectPath()
+
+    LogManager.shared.success("已读取主仓库和 \(result.repos.count - 1) 个依赖仓库")
+    LogManager.shared.info("主仓库当前分支：\(currentBranch.isEmpty ? "未知" : currentBranch)")
+    LogManager.shared.info("主仓库可用 Tag：\(availableTags.count)")
+    if let tagError = result.tagError {
+      LogManager.shared.error("读取主仓库 Tag 失败：\(tagError)")
+    }
+  }
+
   private func finishPullPreview(_ result: PullPreviewResult) {
     isLoading = false
     currentTask = nil
@@ -433,7 +665,11 @@ public final class ReposSwitchViewModel {
     LogManager.shared.info("仓库根目录: \(rootPath)")
   }
 
-  private func finishSwitch(_ results: [RepoSwitchResult]) {
+  private func finishSwitch(
+    _ results: [RepoSwitchResult],
+    targetMode: RepoSwitchTargetMode,
+    targetName: String
+  ) {
     let successCount = results.filter(\.success).count
     let failedResults = results.filter { !$0.success }
     operationResults = Dictionary(uniqueKeysWithValues: results.map { ($0.name, $0.success ? "成功" : "失败") })
@@ -450,17 +686,20 @@ public final class ReposSwitchViewModel {
     }
 
     let failedCount = results.filter { !$0.success }.count
-    operationSummary = "切换结果：成功 \(successCount)，失败 \(failedCount)"
+    let targetDescription = targetMode == .tag ? "Tag \(targetName)" : "分支 \(targetName)"
+    operationSummary = "\(targetDescription) 切换结果：成功 \(successCount)，失败 \(failedCount)"
     if failedCount == 0 {
-      LogManager.shared.success("========== 公版配置切换完成 ==========")
+      LogManager.shared.success("========== 公版仓库 \(targetDescription) 切换完成 ==========")
     } else {
-      LogManager.shared.error("========== 公版配置切换完成，失败 \(failedCount) 个 ==========")
+      LogManager.shared.error("========== 公版仓库 \(targetDescription) 切换完成，失败 \(failedCount) 个 ==========")
     }
 
     isSwitching = false
     isConfirmEnabled = true
     currentTask = nil
-    loadData()
+    if targetMode == .branch {
+      loadData()
+    }
   }
 
   private func finishPull(_ result: PullResult) {
@@ -513,6 +752,10 @@ public final class ReposSwitchViewModel {
     rootPath = ""
     isConfirmEnabled = false
     isPullPreviewLoaded = false
+    isTagPreviewLoaded = false
+    availableTags = []
+    selectedTagName = nil
+    tagLoadErrorMessage = nil
     loadErrorMessage = nil
     operationSummary = nil
     operationResults = [:]
@@ -538,6 +781,16 @@ public final class ReposSwitchViewModel {
     let repos: [RepoSwitchInfo]
     let currentBranch: String
     let error: String?
+  }
+
+  private struct TagSwitchLoadResult: Sendable {
+    let config: ReposConfig?
+    let rootPath: String
+    let repos: [RepoSwitchInfo]
+    let tags: [GitTagInfo]
+    let currentBranch: String
+    let error: String?
+    let tagError: String?
   }
 
   private struct BranchLoadResult: Sendable {

@@ -249,7 +249,7 @@
     const names = { broker: "私版券商切换", submodules: "分支切换（已过时）", public: "分支切换", pull: "仓库更新", tags: "Tag 管理", copy: "私版项目复制" };
     const state = {
       page: "public", mode: "success", loaded: { broker: false, submodules: false, public: false, pull: false, tags: false },
-      busy: false, tagBusyMessage: "", logs: [], activeLevels: new Set(["info", "success", "warning", "error"]),
+      busy: false, tagBusyMessage: "", publicTargetMode: "branch", publicTagsLoaded: false, publicSelectedTag: "v8.4.29", publicPath: "", logs: [], activeLevels: new Set(["info", "success", "warning", "error"]),
       outcomes: {}, errors: {}, copyPairs: 1, copyResult: null, selectedTagRepos: new Set(), tagName: "", tagMessage: "", pushTagToRemote: true, tagProjectPath: "", tagResults: [], tagSummary: "", selectedPullRepos: new Set()
     };
     const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
@@ -302,9 +302,15 @@
     }
     function renderPublic() {
       const loaded = state.loaded.public;
-      pageRoot.innerHTML = heading("公版", names.public, "⑂", "读取 fastlane/repos.yml，按配置切换主仓库和依赖仓库分支。Tag 设置与推送请到 Tag 管理。") +
-        `<section class="panel"><div class="panel-head"><div><h2>主工程</h2><p>目标版本来自主工程选定分支中的 repos.yml</p></div></div><div class="panel-body"><div class="toolbar"><input id="public-path" class="path-input mono" readonly value="${loaded ? "/workspace/TradeBook_App" : ""}" placeholder="选择主工程目录" aria-label="主工程路径"><button data-action="choose-public">选择演示目录</button><select id="public-branch" aria-label="主工程分支"><option>develop</option><option>public_release</option><option>release/8.4</option></select><button class="primary" data-action="load-public">读取 repos.yml</button></div>${state.busy && state.page === "public" ? progress("正在读取配置和仓库状态…") : ""}${state.errors.public ? `<div class="error-box" role="alert">${escapeHTML(state.errors.public)}</div>` : ""}</div></section>` +
-        `<section class="panel"><div class="panel-head"><div><h2>仓库分支切换预览</h2><p>只显示分支目标；repos.yml 中的 tag 字段不会作为切换目标</p></div>${loaded ? `<span class="chip">${demoRepos.length} 个仓库</span>` : ""}</div><div class="panel-body">${loaded ? repoRows(demoRepos.map(repo => ({ ...repo, target: repo.kind === "Tag" ? "develop" : repo.target, kind: "分支" })), state.outcomes.public) : empty("尚未读取仓库", "选择主工程、读取本地分支，再载入 fastlane/repos.yml。")}${state.outcomes.public ? resultSummary(state.outcomes.public) : ""}${state.busy && state.page === "public" ? progress("正在按配置切换仓库分支…") : ""}<div class="footer-actions"><span class="hint">如需为仓库 HEAD 添加 Tag 并推送，请进入独立的 Tag 管理页。</span><button class="primary" data-action="switch-public" ${loaded && !state.busy ? "" : "disabled"}>确认切换</button></div></div></section>`;
+      const isTagMode = state.publicTargetMode === "tag";
+      const targetRepos = demoRepos.map(repo => ({
+        ...repo,
+        target: isTagMode ? state.publicSelectedTag : (repo.kind === "Tag" ? "develop" : repo.target),
+        kind: isTagMode ? "Tag" : "分支"
+      }));
+      pageRoot.innerHTML = heading("公版", names.public, "⑂", "可按 repos.yml 切换分支，也可选择主仓库 Tag 并统一切换所有仓库。") +
+        `<section class="panel"><div class="panel-head"><div><h2>主工程</h2><p>${isTagMode ? "从主仓库读取 Tag，仓库范围来自当前 fastlane/repos.yml" : "目标分支来自主工程选定分支中的 repos.yml"}</p></div></div><div class="panel-body"><div class="toolbar"><input id="public-path" class="path-input mono" readonly value="${escapeHTML(state.publicPath || (loaded ? "/workspace/TradeBook_App" : ""))}" placeholder="选择主工程目录" aria-label="主工程路径"><button data-action="choose-public">选择演示目录</button><select id="public-branch" aria-label="主工程分支" ${isTagMode ? "disabled" : ""}><option>develop</option><option>public_release</option><option>release/8.4</option></select><select id="public-tag" aria-label="目标 Tag" ${!isTagMode || !state.publicTagsLoaded || state.busy ? "disabled" : ""}><option value="v8.4.29" ${state.publicSelectedTag === "v8.4.29" ? "selected" : ""}>v8.4.29</option><option value="v8.4.24" ${state.publicSelectedTag === "v8.4.24" ? "selected" : ""}>v8.4.24</option><option value="v8.4.20" ${state.publicSelectedTag === "v8.4.20" ? "selected" : ""}>v8.4.20</option></select><button class="primary" data-action="${isTagMode ? "load-public-tags" : "load-public"}">${isTagMode ? "读取仓库和 Tag" : "读取 repos.yml"}</button></div><div class="toolbar" aria-label="切换目标类型"><button data-action="public-mode" data-mode="branch" aria-pressed="${!isTagMode}" class="${!isTagMode ? "primary" : ""}">按分支切换</button><button data-action="public-mode" data-mode="tag" aria-pressed="${isTagMode}" class="${isTagMode ? "primary" : ""}">按 Tag 切换</button></div>${isTagMode ? `<p class="hint">切换后仓库处于分离头指针状态；每个仓库都会尝试切换到同名 Tag，本地修改会自动暂存并尝试恢复。</p>` : ""}${state.busy && state.page === "public" ? progress(isTagMode ? "正在读取仓库和主仓库 Tag…" : "正在读取配置和仓库状态…") : ""}${state.errors.public ? `<div class="error-box" role="alert">${escapeHTML(state.errors.public)}</div>` : ""}</div></section>` +
+        `<section class="panel"><div class="panel-head"><div><h2>${isTagMode ? "仓库 Tag 切换预览" : "仓库分支切换预览"}</h2><p>${isTagMode ? `主仓库与 repos.yml 中的全部依赖仓库统一切换到 ${escapeHTML(state.publicSelectedTag)}` : "repos.yml 中的 tag 字段不作为分支切换目标"}</p></div>${loaded ? `<span class="chip">${demoRepos.length} 个仓库</span>` : ""}</div><div class="panel-body">${loaded ? repoRows(targetRepos, state.outcomes.public) : empty("尚未读取仓库", isTagMode ? "读取当前 repos.yml 和主仓库 Tag 后，选择目标 Tag。" : "选择主工程、读取本地分支，再载入 fastlane/repos.yml。")}${state.outcomes.public ? resultSummary(state.outcomes.public) : ""}${state.busy && state.page === "public" ? progress(isTagMode ? "正在逐仓切换到目标 Tag…" : "正在按配置切换仓库分支…") : ""}<div class="footer-actions"><span class="hint">${isTagMode ? "缺少同名 Tag 的仓库单独失败，其余仓库继续；切换后为 detached HEAD。" : "如需为仓库 HEAD 添加 Tag 并推送，请进入独立的 Tag 管理页。"}</span><button class="primary" data-action="switch-public" ${loaded && !state.busy && (!isTagMode || state.publicTagsLoaded) ? "" : "disabled"}>${isTagMode ? `切换到 ${escapeHTML(state.publicSelectedTag)}` : "确认切换"}</button></div></div></section>`;
     }
     function renderPull() {
       const loaded = state.loaded.pull;
@@ -554,7 +560,10 @@
       const action = button.dataset.action;
       if (action === "choose-broker") pickDemoPath("broker-path", "/workspace/TradeBook_Private_Config");
       if (action === "choose-submodules") pickDemoPath("submodule-path", "/workspace/TradeBook_Main");
-      if (action === "choose-public") pickDemoPath("public-path", "/workspace/TradeBook_App");
+      if (action === "choose-public") {
+        state.publicPath = "/workspace/TradeBook_App";
+        pickDemoPath("public-path", state.publicPath);
+      }
       if (action === "choose-pull") pickDemoPath("pull-path", "/workspace/TradeBook_App");
       if (action === "choose-tag-project") {
         pickDemoPath("tag-project-path", "/workspace/TradeBook_App");
@@ -569,11 +578,50 @@
       if (action === "load-broker") loadConfig("broker", "broker-path", "broker-branch", "私版仓库配置");
       if (action === "load-submodules") loadConfig("submodules", "submodule-path", "submodule-branch", "主仓库子模块配置");
       if (action === "load-public") loadConfig("public", "public-path", "public-branch", "fastlane/repos.yml");
+      if (action === "public-mode") {
+        state.publicTargetMode = button.dataset.mode;
+        state.loaded.public = false;
+        state.publicTagsLoaded = false;
+        state.outcomes.public = null;
+        state.errors.public = null;
+        renderPage();
+      }
+      if (action === "load-public-tags") {
+        const path = document.getElementById("public-path")?.value || "";
+        if (!path) { showToast("请先选择主工程演示目录"); return; }
+        state.busy = true;
+        state.errors.public = null;
+        renderPage();
+        addLog("info", "正在读取主仓库 repos.yml 和 Tag 列表（模拟）");
+        window.setTimeout(() => {
+          state.busy = false;
+          if (state.mode === "failure") {
+            state.loaded.public = false;
+            state.publicTagsLoaded = false;
+            state.errors.public = "读取主仓库或 Tag 列表失败：演示配置无效或远程不可用。";
+            addLog("error", "主仓库和 Tag 读取失败（模拟）");
+          } else {
+            state.loaded.public = true;
+            state.publicTagsLoaded = true;
+            state.outcomes.public = null;
+            state.publicSelectedTag = document.getElementById("public-tag")?.value || "v8.4.29";
+            addLog("success", `已读取 ${demoRepos.length} 个仓库和 3 个主仓库 Tag（模拟）`);
+          }
+          renderPage();
+        }, 650);
+      }
       if (action === "load-pull") loadConfig("pull", "pull-path", "pull-path", "公版仓库更新范围");
       if (action === "load-tags") loadConfig("tags", "tag-project-path", "tag-project-path", "公版仓库列表");
       if (action === "switch-broker") confirmAction("确认切换私版仓库？", `将按 repos.yaml 更新 ${brokerRepos.length} 个仓库的分支。请确认已保存需要保留的本地修改。`, "确认切换", () => simulateBatch("broker", brokerRepos, "私版仓库切换"));
       if (action === "switch-submodules") confirmAction("确认切换主仓库与子模块？", `将切换主仓库并更新 ${demoSubmodules.length} 个子模块。`, "确认切换", () => simulateBatch("submodules", demoSubmodules, "子模块切换"));
-      if (action === "switch-public") confirmAction("确认切换公版仓库分支？", `将按 repos.yml 切换 ${demoRepos.length} 个仓库的分支；tag 字段不会作为切换目标。`, "确认切换", () => simulateBatch("public", demoRepos, "公版仓库分支切换"));
+      if (action === "switch-public") {
+        if (state.publicTargetMode === "tag") {
+          const tagRepos = demoRepos.map(repo => ({ ...repo, target: state.publicSelectedTag, kind: "Tag" }));
+          confirmAction("确认切换所有仓库到 Tag？", `将主仓库和 repos.yml 中的 ${demoRepos.length - 1} 个依赖仓库统一切换到 Tag「${state.publicSelectedTag}」。缺少同名 Tag 的仓库单独失败，其余仓库继续；本地修改会自动暂存并尝试恢复。切换后将处于分离头指针状态。`, `切换到 Tag ${state.publicSelectedTag}`, () => simulateBatch("public", tagRepos, `公版 Tag ${state.publicSelectedTag} 切换`));
+        } else {
+          confirmAction("确认切换公版仓库分支？", `将按 repos.yml 切换 ${demoRepos.length} 个仓库的分支；tag 字段不会作为切换目标。`, "确认切换", () => simulateBatch("public", demoRepos, "公版仓库分支切换"));
+        }
+      }
       if (action === "pull-toggle-all") {
         if (state.selectedPullRepos.size === updateRepos.length) state.selectedPullRepos.clear();
         else state.selectedPullRepos = new Set(updateRepos.map(repo => repo.path));
@@ -629,6 +677,10 @@
     });
     document.addEventListener("change", event => {
       if (event.target.id === "push-tag-to-remote") state.pushTagToRemote = event.target.checked;
+      if (event.target.id === "public-tag") {
+        state.publicSelectedTag = event.target.value;
+        renderPage();
+      }
       if (event.target.matches("[data-pull-repo]")) {
         const path = event.target.dataset.pullRepo;
         event.target.checked ? state.selectedPullRepos.add(path) : state.selectedPullRepos.delete(path);

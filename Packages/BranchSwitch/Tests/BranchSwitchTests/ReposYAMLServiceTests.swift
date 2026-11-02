@@ -287,6 +287,102 @@ final class ReposYAMLServiceTests: XCTestCase {
     XCTAssertEqual(try runGitOutput("describe --tags --exact-match", at: repository), "v2.0.0")
   }
 
+  @MainActor
+  func testBranchSwitchCanSwitchWorkspaceAndAllReposToSelectedTag() async throws {
+    let fixture = try makePullFixture(rootIsParent: true)
+    let service = ReposYAMLService()
+    let tagName = "v8.4.29"
+    for repository in [fixture.project, fixture.dependency] {
+      try service.createTag(tagName, message: "Release", at: repository.path)
+      try service.pushTag(tagName, at: repository.path)
+    }
+
+    try commitAndPushChange(
+      in: fixture.workspaceUpdater,
+      fileName: "workspace-later.txt",
+      content: "workspace after tag"
+    )
+    try commitAndPushChange(
+      in: fixture.dependencyUpdater,
+      fileName: "dependency-later.txt",
+      content: "dependency after tag"
+    )
+    try runGit("pull", at: fixture.project)
+    try runGit("pull", at: fixture.dependency)
+
+    let localWorkspaceChange = fixture.project.appending(path: "local-work.txt")
+    let untrackedDependencyChange = fixture.dependency.appending(path: "local-only.txt")
+    try "keep workspace work".write(to: localWorkspaceChange, atomically: true, encoding: .utf8)
+    try "keep dependency work".write(to: untrackedDependencyChange, atomically: true, encoding: .utf8)
+
+    let viewModel = ReposSwitchViewModel()
+    viewModel.projectPath = fixture.project.path
+    viewModel.targetMode = .tag
+    viewModel.loadTagSwitchData()
+    let loadDeadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < loadDeadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    XCTAssertTrue(viewModel.isTagPreviewLoaded)
+    XCTAssertTrue(viewModel.availableTags.contains { $0.name == tagName })
+    XCTAssertEqual(viewModel.repos.map(\.name), ["TradeBook", "Dependency"])
+    viewModel.selectedTagName = tagName
+    XCTAssertTrue(viewModel.canConfirmSwitch)
+
+    viewModel.switchRepos()
+    let switchDeadline = ContinuousClock.now.advanced(by: .seconds(30))
+    while viewModel.isBusy, ContinuousClock.now < switchDeadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    XCTAssertFalse(viewModel.isBusy, "Tag 切换和完成后的刷新应在 30 秒内完成")
+    XCTAssertEqual(viewModel.operationResults["TradeBook"], "成功")
+    XCTAssertEqual(viewModel.operationResults["Dependency"], "成功")
+    XCTAssertEqual(try runGitOutput("branch --show-current", at: fixture.project), "")
+    XCTAssertEqual(try runGitOutput("branch --show-current", at: fixture.dependency), "")
+    XCTAssertEqual(try runGitOutput("describe --tags --exact-match", at: fixture.project), tagName)
+    XCTAssertEqual(try runGitOutput("describe --tags --exact-match", at: fixture.dependency), tagName)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.project.appending(path: "workspace-later.txt").path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.dependency.appending(path: "dependency-later.txt").path))
+    XCTAssertEqual(try String(contentsOf: localWorkspaceChange, encoding: .utf8), "keep workspace work")
+    XCTAssertEqual(try String(contentsOf: untrackedDependencyChange, encoding: .utf8), "keep dependency work")
+  }
+
+  @MainActor
+  func testTagSwitchContinuesWhenDependencyDoesNotHaveSelectedTag() async throws {
+    let fixture = try makePullFixture(rootIsParent: true)
+    let tagName = "v8.4.29-missing-in-dependency"
+    let service = ReposYAMLService()
+    try service.createTag(tagName, message: "Release", at: fixture.project.path)
+    try service.pushTag(tagName, at: fixture.project.path)
+
+    let viewModel = ReposSwitchViewModel()
+    viewModel.projectPath = fixture.project.path
+    viewModel.targetMode = .tag
+    viewModel.loadTagSwitchData()
+    let loadDeadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < loadDeadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+    XCTAssertTrue(viewModel.availableTags.contains { $0.name == tagName })
+
+    viewModel.selectedTagName = tagName
+    viewModel.switchRepos()
+    let switchDeadline = ContinuousClock.now.advanced(by: .seconds(30))
+    while viewModel.isBusy, ContinuousClock.now < switchDeadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    XCTAssertFalse(viewModel.isBusy, "单仓缺少 Tag 不应阻断其他仓库")
+    XCTAssertEqual(viewModel.operationResults["TradeBook"], "成功")
+    XCTAssertEqual(viewModel.operationResults["Dependency"], "失败")
+    let dependencyFailure = try XCTUnwrap(viewModel.operationDetails["Dependency"])
+    XCTAssertTrue(dependencyFailure.contains("未找到 tag"), dependencyFailure)
+    XCTAssertEqual(try runGitOutput("describe --tags --exact-match", at: fixture.project), tagName)
+    XCTAssertEqual(try runGitOutput("branch --show-current", at: fixture.project), "")
+  }
+
   func testTagManagementCreatesPushesAndDeletesTags() throws {
     let remote = temporaryDirectory.appending(path: "tag-remote.git", directoryHint: .isDirectory)
     let repository = temporaryDirectory.appending(path: "tag-repository", directoryHint: .isDirectory)

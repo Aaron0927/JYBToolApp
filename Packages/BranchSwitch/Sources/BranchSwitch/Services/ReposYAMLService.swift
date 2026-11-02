@@ -12,6 +12,7 @@ public enum ReposYAMLServiceError: Error, LocalizedError, Sendable {
   case emptyRepos
   case notGitRepository(String)
   case tagNotFound(repo: String, tag: String)
+  case tagSwitchStashRestoreFailed(tag: String, switchError: String?, restoreError: String)
   case tagPushFailed(name: String, reason: String)
 
   public var errorDescription: String? {
@@ -28,6 +29,11 @@ public enum ReposYAMLServiceError: Error, LocalizedError, Sendable {
       return "路径已存在但不是 Git 仓库: \(path)"
     case .tagNotFound(let repo, let tag):
       return "\(repo) 未找到 tag: \(tag)"
+    case .tagSwitchStashRestoreFailed(let tag, let switchError, let restoreError):
+      if let switchError {
+        return "切换 Tag \(tag) 失败：\(switchError)；恢复本地修改也失败：\(restoreError)。本地修改仍保留在 stash 中。"
+      }
+      return "已切换到 Tag \(tag)，但恢复本地修改失败：\(restoreError)。本地修改仍保留在 stash 中。"
     case .tagPushFailed(let name, let reason):
       return "Tag \(name) 已在本地创建，但推送到 origin 失败：\(reason)"
     }
@@ -436,6 +442,46 @@ public final class ReposYAMLService: Sendable {
     }
   }
 
+  public func updateExistingRepoToTag(
+    name: String,
+    path: String,
+    tag: String,
+    logger: @escaping @Sendable (String) -> Void
+  ) -> RepoSwitchResult {
+    do {
+      logger("开始处理主仓库 \(name)：Tag \(tag)")
+      guard isGitRepository(at: path) else {
+        throw ReposYAMLServiceError.notGitRepository(path)
+      }
+      try checkoutTag(tag, at: path, logger: logger)
+      logger("\(name) 已切换到 Tag \(tag)")
+      return RepoSwitchResult(name: name, success: true)
+    } catch {
+      return RepoSwitchResult(name: name, success: false, error: error.localizedDescription)
+    }
+  }
+
+  public func updateRepoToTag(
+    _ repo: DeclaredRepo,
+    rootURL: URL,
+    tag: String,
+    logger: @escaping @Sendable (String) -> Void
+  ) -> RepoSwitchResult {
+    do {
+      let repoURL = repoURL(for: repo, rootURL: rootURL)
+      logger("开始处理 \(repo.name)：Tag \(tag)")
+      try ensureRepoExists(repo, at: repoURL, logger: logger)
+      guard isGitRepository(at: repoURL.path) else {
+        throw ReposYAMLServiceError.notGitRepository(repoURL.path)
+      }
+      try checkoutTag(tag, at: repoURL.path, logger: logger)
+      logger("\(repo.name) 已切换到 Tag \(tag)")
+      return RepoSwitchResult(name: repo.name, success: true)
+    } catch {
+      return RepoSwitchResult(name: repo.name, success: false, error: error.localizedDescription)
+    }
+  }
+
   public func getCurrentBranch(at path: String) -> String? {
     do {
       let output = try processRunner.run("git rev-parse --abbrev-ref HEAD", at: path)
@@ -626,6 +672,15 @@ public final class ReposYAMLService: Sendable {
     }
   }
 
+  private func hasAnyChanges(at path: String) -> Bool {
+    do {
+      let output = try processRunner.run("git status --porcelain --untracked-files=all", at: path)
+      return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    } catch {
+      return false
+    }
+  }
+
   private func updateGitRepository(
     name: String,
     path: String,
@@ -721,19 +776,68 @@ public final class ReposYAMLService: Sendable {
     }
     try validateTagName(tag, at: path)
 
-    logger("拉取 tags: \(tag)")
-    _ = try processRunner.run("git fetch --tags", at: path, timeout: 180)
+    let hadChanges = hasAnyChanges(at: path)
+    var didStashChanges = false
+    do {
+      if hadChanges {
+        logger("检测到本地修改，切换 Tag 前自动暂存（包含未跟踪文件）")
+        _ = try processRunner.run(
+          "git stash push --include-untracked -m 'ReposSwitch: auto-stash before tag switch'",
+          at: path
+        )
+        didStashChanges = true
+      }
 
-    guard try tagExists(tag, at: path) else {
-      throw ReposYAMLServiceError.tagNotFound(repo: URL(fileURLWithPath: path).lastPathComponent, tag: tag)
+      let remotes = try processRunner.run("git remote", at: path)
+        .split(whereSeparator: \.isNewline)
+      if !remotes.isEmpty {
+        logger("拉取远程 tags: \(tag)")
+        _ = try processRunner.run("git fetch --tags", at: path, timeout: 180)
+      }
+
+      guard try tagExists(tag, at: path) else {
+        throw ReposYAMLServiceError.tagNotFound(
+          repo: URL(fileURLWithPath: path).lastPathComponent,
+          tag: tag
+        )
+      }
+
+      logger("按 Tag 切换（分离头指针）: \(tag)")
+      _ = try processRunner.run("git checkout --detach \(shellEscaped("refs/tags/\(tag)"))", at: path)
+    } catch let switchError {
+      if didStashChanges {
+        do {
+          try stashPop(at: path)
+        } catch let restoreError {
+          throw ReposYAMLServiceError.tagSwitchStashRestoreFailed(
+            tag: tag,
+            switchError: switchError.localizedDescription,
+            restoreError: restoreError.localizedDescription
+          )
+        }
+      }
+      throw switchError
     }
 
-    logger("按 tag 切换: \(tag)")
-    _ = try processRunner.run("git checkout --detach \(shellEscaped("refs/tags/\(tag)"))", at: path)
+    if didStashChanges {
+      do {
+        try stashPop(at: path)
+        logger("本地修改已恢复")
+      } catch let restoreError {
+        throw ReposYAMLServiceError.tagSwitchStashRestoreFailed(
+          tag: tag,
+          switchError: nil,
+          restoreError: restoreError.localizedDescription
+        )
+      }
+    }
   }
 
   private func tagExists(_ tag: String, at path: String) throws -> Bool {
-    let output = try processRunner.run("git rev-parse --verify \(shellEscaped("refs/tags/\(tag)^{}"))", at: path)
+    guard let output = try? processRunner.run(
+      "git rev-parse --verify \(shellEscaped("refs/tags/\(tag)^{}"))",
+      at: path
+    ) else { return false }
     return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
