@@ -374,7 +374,7 @@ final class ReposYAMLServiceTests: XCTestCase {
 
   @MainActor
   func testTagManagementSelectsAllRepositoriesAfterLoad() async throws {
-    let fixture = try makePullFixture()
+    let fixture = try makePullFixture(rootIsParent: true)
     let viewModel = TagManagementViewModel()
     viewModel.projectPath = fixture.project.path
     viewModel.loadRepositories()
@@ -389,10 +389,51 @@ final class ReposYAMLServiceTests: XCTestCase {
     XCTAssertEqual(viewModel.repositories.count, 2)
     XCTAssertTrue(viewModel.areAllRepositoriesSelected)
     XCTAssertEqual(viewModel.selectedRepositories.count, 2)
+    let workspace = try XCTUnwrap(viewModel.repositories.first { $0.scope == .workspace })
+    XCTAssertEqual(workspace.name, "TradeBook")
+    XCTAssertEqual(workspace.absolutePath, fixture.project.path)
+    XCTAssertTrue(workspace.isCloned)
+    XCTAssertTrue(viewModel.selectedRepositoryIDs.contains(workspace.id))
 
     viewModel.setRepository(viewModel.repositories[0].id, selected: false)
     XCTAssertEqual(viewModel.selectedRepositories.count, 1)
     XCTAssertFalse(viewModel.areAllRepositoriesSelected)
+  }
+
+  @MainActor
+  func testTagManagementCanCreateTagForTradeBookMainRepository() async throws {
+    let fixture = try makePullFixture(rootIsParent: true)
+    let viewModel = TagManagementViewModel()
+    viewModel.projectPath = fixture.project.path
+    viewModel.loadRepositories()
+
+    let loadDeadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < loadDeadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+    let workspace = try XCTUnwrap(viewModel.repositories.first { $0.scope == .workspace })
+    viewModel.setAllRepositoriesSelected(false)
+    viewModel.setRepository(workspace.id, selected: true)
+    let tagName = "v1.0.0-tradebook-main"
+
+    viewModel.createAndPushTag(
+      name: tagName,
+      message: "",
+      repositoryIDs: [workspace.id],
+      pushToRemote: false
+    )
+
+    let operationDeadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while viewModel.isBusy, ContinuousClock.now < operationDeadline {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+
+    XCTAssertEqual(viewModel.operationResults.map(\.status), [.success])
+    let createdTag = try XCTUnwrap(
+      ReposYAMLService().loadTags(at: fixture.project.path).tags.first { $0.name == tagName }
+    )
+    XCTAssertNotNil(createdTag.localObjectID)
+    XCTAssertNil(createdTag.remoteObjectID)
   }
 
   @MainActor
@@ -536,13 +577,21 @@ final class ReposYAMLServiceTests: XCTestCase {
     XCTAssertThrowsError(try ReposYAMLService().createTag("bad..tag", message: "Invalid", at: repository.path))
   }
 
-  private func makePullFixture() throws -> PullFixture {
+  private func makePullFixture(rootIsParent: Bool = false) throws -> PullFixture {
+    let temporaryDirectory = try XCTUnwrap(self.temporaryDirectory)
     let workspaceRemote = temporaryDirectory.appending(path: "workspace.git", directoryHint: .isDirectory)
     let dependencyRemote = temporaryDirectory.appending(path: "dependency.git", directoryHint: .isDirectory)
     let workspaceSeed = temporaryDirectory.appending(path: "workspace-seed", directoryHint: .isDirectory)
     let dependencySeed = temporaryDirectory.appending(path: "dependency-seed", directoryHint: .isDirectory)
-    let project = temporaryDirectory.appending(path: "project", directoryHint: .isDirectory)
-    let dependency = project.appending(path: "Dependencies/Dependency", directoryHint: .isDirectory)
+    let repositoriesRoot = rootIsParent
+      ? temporaryDirectory.appending(path: "repositories-root", directoryHint: .isDirectory)
+      : temporaryDirectory
+    let project = rootIsParent
+      ? repositoriesRoot.appending(path: "TradeBook", directoryHint: .isDirectory)
+      : temporaryDirectory.appending(path: "project", directoryHint: .isDirectory)
+    let dependency = rootIsParent
+      ? repositoriesRoot.appending(path: "Dependencies/Dependency", directoryHint: .isDirectory)
+      : project.appending(path: "Dependencies/Dependency", directoryHint: .isDirectory)
     let workspaceUpdater = temporaryDirectory.appending(path: "workspace-updater", directoryHint: .isDirectory)
     let dependencyUpdater = temporaryDirectory.appending(path: "dependency-updater", directoryHint: .isDirectory)
 
@@ -553,8 +602,9 @@ final class ReposYAMLServiceTests: XCTestCase {
 
     let configURL = workspaceSeed.appending(path: "fastlane/repos.yml")
     try FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let configRoot = rootIsParent ? "../.." : ".."
     let config = """
-    root: ".."
+    root: "\(configRoot)"
     repos:
       - name: Dependency
         url: "\(dependencyRemote.path)"
@@ -566,6 +616,7 @@ final class ReposYAMLServiceTests: XCTestCase {
     try runGit("commit -m 'Add repos config'", at: workspaceSeed)
     try runGit("push", at: workspaceSeed)
 
+    try FileManager.default.createDirectory(at: repositoriesRoot, withIntermediateDirectories: true)
     try runGit("clone \(shellEscaped(workspaceRemote.path)) \(shellEscaped(project.path))", at: temporaryDirectory)
     try FileManager.default.createDirectory(at: dependency.deletingLastPathComponent(), withIntermediateDirectories: true)
     try runGit("clone \(shellEscaped(dependencyRemote.path)) \(shellEscaped(dependency.path))", at: temporaryDirectory)

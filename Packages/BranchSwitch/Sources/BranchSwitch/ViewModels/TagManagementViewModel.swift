@@ -76,8 +76,8 @@ public final class TagManagementViewModel {
         do {
           let service = ReposYAMLService()
           let loaded = try service.loadRepoInfos(atProjectPath: path)
-          let branch = service.getCurrentBranch(at: loaded.rootPath) ?? ""
-          let workspace = service.makeWorkspaceRepoInfo(rootPath: loaded.rootPath, targetBranch: branch)
+          let branch = service.getCurrentBranch(at: path) ?? ""
+          let workspace = service.makeWorkspaceRepoInfo(rootPath: path, targetBranch: branch)
           return RepositoryLoadResult(repositories: [workspace] + loaded.infos, error: nil)
         } catch {
           return RepositoryLoadResult(repositories: [], error: error.localizedDescription)
