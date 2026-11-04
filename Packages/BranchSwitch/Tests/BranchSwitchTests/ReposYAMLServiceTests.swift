@@ -350,12 +350,13 @@ final class ReposYAMLServiceTests: XCTestCase {
   }
 
   @MainActor
-  func testTagSwitchContinuesWhenDependencyDoesNotHaveSelectedTag() async throws {
+  func testTagSwitchSkipsDependencyWhenItDoesNotHaveSelectedTag() async throws {
     let fixture = try makePullFixture(rootIsParent: true)
     let tagName = "v8.4.29-missing-in-dependency"
     let service = ReposYAMLService()
     try service.createTag(tagName, message: "Release", at: fixture.project.path)
     try service.pushTag(tagName, at: fixture.project.path)
+    let dependencyBranchBeforeSwitch = try runGitOutput("branch --show-current", at: fixture.dependency)
 
     let viewModel = ReposSwitchViewModel()
     viewModel.projectPath = fixture.project.path
@@ -376,11 +377,13 @@ final class ReposYAMLServiceTests: XCTestCase {
 
     XCTAssertFalse(viewModel.isBusy, "单仓缺少 Tag 不应阻断其他仓库")
     XCTAssertEqual(viewModel.operationResults["TradeBook"], "成功")
-    XCTAssertEqual(viewModel.operationResults["Dependency"], "失败")
-    let dependencyFailure = try XCTUnwrap(viewModel.operationDetails["Dependency"])
-    XCTAssertTrue(dependencyFailure.contains("未找到 tag"), dependencyFailure)
+    XCTAssertEqual(viewModel.operationResults["Dependency"], "跳过")
+    XCTAssertTrue(viewModel.operationSummary?.contains("跳过 1") == true)
+    let dependencySkip = try XCTUnwrap(viewModel.operationDetails["Dependency"])
+    XCTAssertTrue(dependencySkip.contains("已跳过"), dependencySkip)
     XCTAssertEqual(try runGitOutput("describe --tags --exact-match", at: fixture.project), tagName)
     XCTAssertEqual(try runGitOutput("branch --show-current", at: fixture.project), "")
+    XCTAssertEqual(try runGitOutput("branch --show-current", at: fixture.dependency), dependencyBranchBeforeSwitch)
   }
 
   func testTagManagementCreatesPushesAndDeletesTags() throws {

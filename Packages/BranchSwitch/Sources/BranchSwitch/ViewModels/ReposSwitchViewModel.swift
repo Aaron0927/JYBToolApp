@@ -670,26 +670,41 @@ public final class ReposSwitchViewModel {
     targetMode: RepoSwitchTargetMode,
     targetName: String
   ) {
-    let successCount = results.filter(\.success).count
-    let failedResults = results.filter { !$0.success }
-    operationResults = Dictionary(uniqueKeysWithValues: results.map { ($0.name, $0.success ? "成功" : "失败") })
-    operationDetails = Dictionary(uniqueKeysWithValues: failedResults.compactMap { result in
+    let successCount = results.filter { $0.status == .success }.count
+    let skippedCount = results.filter { $0.status == .skipped }.count
+    let failedCount = results.filter { $0.status == .failed }.count
+    operationResults = Dictionary(uniqueKeysWithValues: results.map { result in
+      let status: String
+      switch result.status {
+      case .success: status = "成功"
+      case .skipped: status = "跳过"
+      case .failed: status = "失败"
+      }
+      return (result.name, status)
+    })
+    operationDetails = Dictionary(uniqueKeysWithValues: results.filter { $0.status != .success }.compactMap { result in
       result.error.map { (result.name, $0) }
     })
 
     for result in results {
-      if result.success {
+      switch result.status {
+      case .success:
         LogManager.shared.success("✓ \(result.name) 切换成功")
-      } else {
+      case .skipped:
+        LogManager.shared.info("- \(result.name) 切换已跳过：\(result.error ?? "Tag 不存在")")
+      case .failed:
         LogManager.shared.error("✗ \(result.name) 切换失败: \(result.error ?? "未知错误")")
       }
     }
 
-    let failedCount = results.filter { !$0.success }.count
-    let targetDescription = targetMode == .tag ? "Tag \(targetName)" : "分支 \(targetName)"
-    operationSummary = "\(targetDescription) 切换结果：成功 \(successCount)，失败 \(failedCount)"
+    let targetDescription = targetMode == .tag ? "Tag「\(targetName)」" : "分支「\(targetName)」"
+    operationSummary = "\(targetDescription) 切换结果：成功 \(successCount)，跳过 \(skippedCount)，失败 \(failedCount)"
     if failedCount == 0 {
-      LogManager.shared.success("========== 公版仓库 \(targetDescription) 切换完成 ==========")
+      if skippedCount == 0 {
+        LogManager.shared.success("========== 公版仓库 \(targetDescription) 切换完成 ==========")
+      } else {
+        LogManager.shared.warning("========== 公版仓库 \(targetDescription) 切换完成，跳过 \(skippedCount) 个 ==========")
+      }
     } else {
       LogManager.shared.error("========== 公版仓库 \(targetDescription) 切换完成，失败 \(failedCount) 个 ==========")
     }

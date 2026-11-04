@@ -234,7 +234,7 @@ public struct ReposSwitchView: View {
 
   private var confirmationMessage: String {
     if viewModel.targetMode == .tag, let selectedTagName = viewModel.selectedTagName {
-      return "将在主仓库和 repos.yml 中的全部依赖仓库中查找并切换到同名 Tag「\(selectedTagName)」。缺少该 Tag 或仓库不可用时会逐项显示失败，其他仓库继续执行；本地修改会自动暂存并在切换后恢复。切换后仓库处于分离头指针状态。"
+      return "将在主仓库和 repos.yml 中的全部依赖仓库中查找并切换到同名 Tag「\(selectedTagName)」。依赖仓库缺少该 Tag 时会跳过；其他仓库继续执行。仓库不可用或切换失败时会显示失败。本地修改会自动暂存并在切换后恢复，切换后仓库处于分离头指针状态。"
     }
     return "将按 repos.yml 对主工作区及依赖仓库切换分支。存在本地修改的仓库会自动暂存并尝试恢复。"
   }

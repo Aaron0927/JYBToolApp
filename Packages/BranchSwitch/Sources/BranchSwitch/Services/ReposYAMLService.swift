@@ -40,14 +40,28 @@ public enum ReposYAMLServiceError: Error, LocalizedError, Sendable {
   }
 }
 
+public enum RepoSwitchStatus: Equatable, Sendable {
+  case success
+  case skipped
+  case failed
+}
+
 public struct RepoSwitchResult: Sendable {
   public let name: String
-  public let success: Bool
+  public let status: RepoSwitchStatus
   public let error: String?
+
+  public var success: Bool { status == .success }
 
   public init(name: String, success: Bool, error: String? = nil) {
     self.name = name
-    self.success = success
+    status = success ? .success : .failed
+    self.error = error
+  }
+
+  public init(name: String, status: RepoSwitchStatus, error: String? = nil) {
+    self.name = name
+    self.status = status
     self.error = error
   }
 }
@@ -477,6 +491,13 @@ public final class ReposYAMLService: Sendable {
       try checkoutTag(tag, at: repoURL.path, logger: logger)
       logger("\(repo.name) 已切换到 Tag \(tag)")
       return RepoSwitchResult(name: repo.name, success: true)
+    } catch let error as ReposYAMLServiceError {
+      if case .tagNotFound = error {
+        let message = "仓库没有 Tag「\(tag)」，已跳过。"
+        logger("\(repo.name) \(message)")
+        return RepoSwitchResult(name: repo.name, status: .skipped, error: message)
+      }
+      return RepoSwitchResult(name: repo.name, success: false, error: error.localizedDescription)
     } catch {
       return RepoSwitchResult(name: repo.name, success: false, error: error.localizedDescription)
     }
